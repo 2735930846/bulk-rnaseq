@@ -1,0 +1,37 @@
+# 安装和加载GseaVis包，直接package就可以了
+library(GseaVis)
+library(clusterProfiler) 
+#要学会修改，看一下自己的数据框通路那一列的列名是什么
+a <- gsea_result_df[,"Description"] 
+head(a,6) 
+#查看前六个通路，便于复制到下边。 注意：这个包的组合图最多只能显示9个通路，好像
+setid <- c("KEGG_RIBOSOME","KEGG_OXIDATIVE_PHOSPHORYLATION","KEGG_PARKINSONS_DISEASE","KEGG_SPLICEOSOME","KEGG_HUNTINGTONS_DISEASE", 
+           "KEGG_PROTEASOME")
+#这里先赋值一下，注意这个不是那个数据框，是赋予文件那个，里面有好多分类，是总的未经处理的结果数据，不是数据框
+gseaRes <- gsea
+# 可视化单条通路
+gseaNb(object = gseaRes,
+       geneSetID = setid[1],
+       subPlot = 1) 
+
+# 循环画出单通路的曲线图并组合
+plist <- lapply(1:4, function(x){
+  gseaNb(object = gseaRes,
+         geneSetID = setid[x],
+         addPval = TRUE,
+         pvalX = 0.6,
+         pvalY = 0.6)
+})
+
+# 组合并展示
+cowplot::plot_grid(plotlist = plist, nrow = 1, align = 'hv')
+
+# 多元通路的可视化
+gseaNb(object = gseaRes,
+       geneSetID = setid,
+       curveCol = ggsci::pal_npg()(9),
+       subPlot = 2,
+       addPval = TRUE,
+       pvalX = 1,
+       pvalY = 1.2)
+dev.off()
