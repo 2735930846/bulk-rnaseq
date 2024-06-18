@@ -1,0 +1,3949 @@
+####TCGA-STAD 数据下载####
+setwd('TCGA-STAD')
+setwd("TCGAdata")
+library(tidyverse)#加载包
+#安装TCGAbiolinks包
+#install.packages("BiocManager")
+library(BiocManager)
+chooseBioCmirror()
+#BiocManager::install("TCGAbiolinks")
+library(TCGAbiolinks)#加载包
+cancer_type = "TCGA-STAD"   #肿瘤类型，这里可修改癌症类型
+#TCGA 肿瘤缩写：https://www.jianshu.com/p/3c0f74e85825
+expquery <- GDCquery(project = cancer_type,
+                     data.category = "Transcriptome Profiling",
+                     data.type = "Gene Expression Quantification",
+                     workflow.type = "STAR - Counts"
+)
+GDCdownload(expquery,directory = "GDCdata")
+expquery2 <- GDCprepare(expquery,directory = "GDCdata",summarizedExperiment = T)
+save(expquery2,file = "stad.gdc_2022.rda") # 保存 rda格式
+
+####TCGA counts/tpms提取及整理####
+####counts####
+setwd('TCGA-STAD')
+setwd("TCGAdata")
+library(tidyverse)
+load("stad.gdc_2022.rda")#导入文件，rda格式文件也可直接从文件夹双击导入
+load("gene_annotation_2022.rda")#导入gene注释文件
+table(gene_annotation_2022$type)#table 分组计数 频数
+#基因名称symbol ENSEMBL
+
+#提取counts 以下三句无需掌握 
+counts <- expquery2@assays@data@listData[["unstranded"]]
+colnames(counts) <- expquery2@colData@rownames
+rownames(counts) <- expquery2@rowRanges@ranges@NAMES
+#基因ID转换
+counts <- as.data.frame(counts)
+counts <- rownames_to_column(counts,var = 'ENSEMBL')
+counts <- inner_join(counts,gene_annotation_2022,"ENSEMBL")
+counts <- counts[!duplicated(counts$symbol),]#美元符号
+#上面四句可以用管道符合成一句吗
+counts <- counts %>% 
+  as.data.frame() %>% 
+  rownames_to_column("ENSEMBL") %>% 
+  inner_join(gene_annotation_2022,"ENSEMBL") %>% 
+  .[!duplicated(.$symbol),]
+
+
+rownames(counts) <- NULL
+counts <- counts %>% column_to_rownames("symbol") 
+#counts <- column_to_rownames(counts,"symbol")
+#继续跑
+# 保留mRNA 
+#table
+table(counts$type)#（注：可通过table(counts$type)查看基因类型）#lncRNA
+counts <- counts[counts$type == "protein_coding",]
+#counts <- counts[counts$type == "lncRNA",]
+counts <- counts[,-c(1,ncol(counts))]
+#ncol是什么
+ncol(counts)
+# 把TCGA barcode切割为16位字符,并去除重复样本
+colnames(counts) <- substring(colnames(counts),1,16)
+counts <- counts[,!duplicated(colnames(counts))]
+table(substring(colnames(counts),14,16))
+# 保留01A  （注：可通过table(substring(colnames(counts),14,16))查看样本类型）
+counts01A <- counts[,substring(colnames(counts),1,1) == "K"]
+# 保留11A
+counts11A <- counts[,substring(colnames(counts),1,1) == c("T")]
+table(substring(colnames(counts01A),14,16))
+table(substring(colnames(counts11A),14,16))
+
+####tpms####
+#和counts基本一模一样
+tpms <- expquery2@assays@data@listData[["tpm_unstrand"]]
+colnames(tpms) <- expquery2@colData@rownames
+rownames(tpms) <- expquery2@rowRanges@ranges@NAMES
+tpms <- tpms %>% 
+  as.data.frame() %>% 
+  rownames_to_column("ENSEMBL") %>% 
+  inner_join(gene_annotation_2022,"ENSEMBL") %>% 
+  .[!duplicated(.$symbol),]
+rownames(tpms) <- NULL
+tpms <- tpms %>% column_to_rownames("symbol") 
+# 保留mRNA （注：可通过table(tpms$type)查看基因类型）
+tpms <- tpms[tpms$type == "protein_coding",]
+tpms <- tpms[,-c(1,ncol(tpms))]
+# 把TCGA barcode切割为16位字符,并去除重复样本
+colnames(tpms) <- substring(colnames(tpms),1,16)
+tpms <- tpms[,!duplicated(colnames(tpms))]
+# 保留01A  （注：可通过table(substring(colnames(tpms),14,16))查看样本类型）
+tpms01A <- tpms[,substring(colnames(tpms),1,1) == c("K")]
+# 保留11A
+tpms11A <- tpms[,substring(colnames(tpms),1,1) == c("T")]
+
+#判断counts和tpms的行列名是否一致
+#identical的用法
+a <- c("a","b","c")
+b <- c("b","a","c")
+identical(a,b)
+
+identical(rownames(counts01A),rownames(counts11A))
+identical(rownames(tpms01A),rownames(tpms11A))
+identical(rownames(counts01A),rownames(tpms01A))
+identical(colnames(counts01A),colnames(tpms01A))
+
+#cbind和rbind
+
+#cbind之前需要确认两个数据框的行名
+counts <- cbind(counts01A,counts11A)
+table(substring(colnames(counts),14,16))
+tpms <- cbind(tpms01A,tpms11A)
+
+####tpms_log2####
+range(tpms)#查看数据范围
+range(tpms01A)
+range(tpms11A)
+tpms_log2 <- log2(tpms+1)#log2转换 为什么要加1
+range(tpms_log2)
+tpms01A_log2 <- log2(tpms01A+1)
+range(tpms01A_log2)
+tpms11A_log2 <- log2(tpms11A+1)
+range(tpms11A_log2)
+#保存counts和tpms数据
+a <- rownames(counts)
+all_counts <- all_counts[a,]
+all_FPKM <- all_FPKM[a,]
+all_counts <- na.omit(all_FPKM)
+write.table(counts01A,"counts01A.txt",sep = "\t",row.names = T,col.names = NA,quote = F)
+write.table(counts11A,"counts11A.txt",sep = "\t",row.names = T,col.names = NA,quote = F)
+write.table(all_counts,"counts.txt",sep = "\t",row.names = T,col.names = NA,quote = F)
+write.table(all_counts,"tpms_log2.txt",sep = "\t",row.names = T,col.names = NA,quote = F)
+write.table(tpms01A,"tpms01A_log2.txt",sep = "\t",row.names = T,col.names = NA,quote = F)
+write.table(tpms11A,"tpms11A_log2.txt",sep = "\t",row.names = T,col.names = NA,quote = F)
+
+####TCGA T/N差异分析####
+#设置工作目录
+setwd("TCGA-STAD")
+setwd("T_N_DEG")
+##读取文本文件
+counts1 <- read.table("counts1.txt",sep = "\t",row.names = 1,check.names = F,stringsAsFactors = F,header = T)
+#差异分析
+library(tidyverse)
+#安装BiocManager
+#BiocManager::install('DESeq2')
+library(DESeq2)
+##以下理解即可
+#去除低质量的基因 质控
+counts = counts[apply(counts, 1, function(x) sum(x > 1) > 32), ]
+#设置分组信息
+conditions=data.frame(sample=colnames(counts),
+                      group=factor(ifelse(substr(colnames(counts),1,1) == "K","T","N"),levels = c("N","T"))) %>% 
+  column_to_rownames("sample")
+
+#data.frame创建数据框
+x <- data.frame(name=c("zhang","li","wu"),
+                rank=c("1","2","3")
+)
+
+factor(ifelse(substr(colnames(counts),1,1) == "K","T","N"),levels = c("N","T"))#因子
+
+
+
+#准备差异分析
+dds <- DESeqDataSetFromMatrix(
+  countData = counts,
+  colData = conditions,
+  design = ~ group)
+#开始差异分析
+dds <- DESeq(dds)
+resultsNames(dds)
+res <- results(dds)
+save(res,file = "STAD-DEG.rda")#一定要保存！
+#自定义差异基因
+DEG <- as.data.frame(res)
+DEG <- arrange(DEG,padj)
+#DEG <- arrange(DEG,desc(padj))
+#arrange(数据框名,列名) 默认从小到大排序
+#arrange(数据框名，desc(列名)) 从大到小排序
+DEG <- filter(DEG,abs(log2FoldChange) > 1, padj < 0.05)
+#filter(数据框名,筛选条件)
+#abs 绝对值
+
+#三合一
+DEG <- as.data.frame(res)%>% 
+  arrange(padj) %>% 
+  filter(abs(log2FoldChange) > 1, padj < 0.05)#根据自己需要
+
+####TCGA差异分析热图展示####
+exp <- read.table("tpms_log2.txt",sep = "\t",row.names = 1,check.names = F,stringsAsFactors = F,header = T)
+
+DEG <- as.data.frame(res)
+DEG <- arrange(DEG,padj)
+
+#DEG <- as.data.frame(res)%>% arrange(padj)
+
+logFC_cutoff <- 1 #and &
+type1 = (DEG$padj < 0.05)&(DEG$log2FoldChange < -logFC_cutoff)
+type2 = (DEG$padj < 0.05)&(DEG$log2FoldChange > logFC_cutoff)
+DEG$change = ifelse(type1,"DOWN",ifelse(type2,"UP","NOT"))
+table(DEG$change)
+DEG <- na.omit(DEG)
+#下载pheatmap包 两种方法
+library(pheatmap)
+genenames <- rownames(DEG)
+cg = genenames[DEG$change != "NOT"]
+#合二为一
+cg = rownames(DEG)[DEG$change != "NOT"]#不等于、
+#方法二
+a <- filter(DEG,change == 'UP')
+b <- filter(DEG,change == 'DOWN')
+c <- rbind(a,b)
+d <- rownames(c)
+identical(cg,d)
+#提取差异基因表达谱
+exp_diff <- exp[d,]
+
+#设置分组信息
+group_list=factor(ifelse(substr(colnames(exp),1,1) == "T","T","N"),levels = c("N","T"))
+annotation_col=data.frame(group=group_list)
+rownames(annotation_col)=colnames(exp_diff)
+
+#分组信息方法二
+#annotation_col=data.frame(sample=colnames(exp_diff),
+#                      group=factor(ifelse(substr(colnames(exp_diff),14,16) == "01A","T","N"),levels = c("N","T"))) %>% 
+#  column_to_rownames("sample")
+
+#分组信息方法三
+#annotation_col <- conditions
+
+#开始画图
+pheatmap(exp_diff,
+         annotation_col=annotation_col,
+         scale = "row",
+         show_rownames = F,
+         show_colnames =F,
+         color = colorRampPalette(c("navy", "white", "red"))(50),
+         cluster_cols =F,
+         cluster_rows = F,
+         fontsize = 10,
+         fontsize_row=3,
+         fontsize_col=3)
+#保存图片 调整大小
+dev.off()#关闭画板
+
+#调整热图颜色深浅
+pheatmap(exp_diff,
+         annotation_col=annotation_col,
+         scale = "row",
+         show_rownames = F,
+         show_colnames =F,
+         color = colorRampPalette(c(rep("royalblue",4),"white",rep("firebrick3",4)))(50),
+         cluster_cols =T,
+         cluster_rows = T,
+         fontsize = 10,
+         fontsize_row=3,
+         fontsize_col=3)
+#保存图片 调整大小
+dev.off()#关闭画板
+
+
+####TCGA差异分析火山图展示####
+#安装包
+#install.packages("ggpubr")
+#install.packages("ggthemes")
+library(ggpubr)
+library(ggthemes)
+setwd("TCGA-STAD")
+setwd("T_N_DEG")
+library(tidyverse)
+exp <- read.table("tpms_log2.txt",sep = "\t",row.names = 1,check.names = F,stringsAsFactors = F,header = T)
+#读取差异分析rda文件
+#DEG <- as.data.frame(res)%>% arrange(padj)
+DEG <- as.data.frame(res)
+DEG <- arrange(DEG,padj)
+
+logFC_cutoff <- 1
+type1 = (DEG$padj < 0.05)&(DEG$log2FoldChange < -logFC_cutoff)
+type2 = (DEG$padj < 0.05)&(DEG$log2FoldChange > logFC_cutoff)
+DEG$change = ifelse(type1,"DOWN",ifelse(type2,"UP","NOT"))
+DEG <- na.omit(DEG)
+table(DEG$change)
+
+#下面直接跑即可
+DEG$logP <- -log10(DEG$padj)#为什么要-log呢 数学原理
+#初步图片
+ggscatter(DEG,
+          x = "log2FoldChange", y = "logP") +
+  theme_base()
+
+#增加基因上下调信息
+ggscatter(DEG, x = "log2FoldChange", y = "logP",
+          color = "change",
+          palette = c("blue", "black", "red"),
+          size = 1) +
+  theme_base()
+
+#添加分界线
+ggscatter(DEG, x = "log2FoldChange", y = "logP", xlab = "log2FoldChange",
+          ylab = "-log10(Adjust P-value)",
+          color = "change",
+          palette = c("blue", "black", "red"),
+          size = 1) +
+  theme_base() +
+  geom_hline(yintercept = -log10(0.05), linetype = "dashed") +
+  geom_vline(xintercept = c(-1, 1), linetype = "dashed") +
+  scale_x_continuous(limits = c(-8, 8), breaks = seq(-8, 8, by = 2)) 
+dev.off()
+
+##如何添加特定基因标签
+DEG$Gene <- rownames(DEG)
+DEG$Label = "" 
+gene <- "CDKN3" #输入你要的基因名
+#gene <- c("","","")
+#如何添加多个基因
+
+DEG$Label[match(gene, DEG$Gene)] <- gene
+#画图
+ggscatter(DEG, x = "log2FoldChange", y = "logP",
+          color = "change",
+          palette = c("blue", "black", "red"),
+          size = 1,
+          label = DEG$Label,
+          font.label = 8,
+          repel = T,
+          xlab = "log2FoldChange",
+          ylab = "-log10(Adjust P-value)") +
+  theme_base() +
+  geom_hline(yintercept = -log10(0.05), linetype = "dashed") +
+  geom_vline(xintercept = c(-1, 1), linetype = "dashed")
+dev.off()
+
+####作业1####
+#TCGA-LUAD数据整理好 保存6个txt
+
+####Class3####
+####选定基因肿瘤/正常表达柱状图####
+setwd("TCGA-STAD")
+setwd("T_N_DEG")
+library(tidyverse)
+tpms01A_log2 <- read.table("tpms01A_log2.txt",sep = "\t",row.names = 1,check.names = F,stringsAsFactors = F,header = T)
+tpms11A_log2 <- read.table("tpms11A_log2.txt",sep = "\t",row.names = 1,check.names = F,stringsAsFactors = F,header = T)
+gene <- "CDKN3"#以后修改这里即可 小技巧
+#gene <- c("","","") 
+#如果想多提取几个基因怎么办 集合
+a <- tpms01A_log2[gene,]
+b <- tpms11A_log2[gene,]
+##运用传导符%>%  cltrl+shift+M 
+a <- a %>% t() %>% as.data.frame()
+b <- b %>% t() %>% as.data.frame()
+write.csv(a, file = "CDKN3_01A.csv")
+write.csv(b, file = "CDKN3_11A.csv")
+#我喜欢用仙桃学术画图 便于修图 而且免费
+#Graphpad等
+#R语言代码画图 更快！！！
+a <- read.table("tpms_log2.txt",sep = "\t",row.names = 1,check.names = F,stringsAsFactors = F,header = T)
+a <- a %>% t() %>% as.data.frame()
+#添加分组信息
+a <- a %>%  mutate(group=factor(ifelse(substr(rownames(a),14,16) == "01A","Tumor","Normal"),levels = c("Normal","Tumor")))
+#a$group <- factor(ifelse(substr(rownames(a),14,16) == "01A","Tumor","Normal"),levels = c("Normal","Tumor"))
+#levels的顺序反过来会怎么样？
+library(ggpubr)
+library(ggsci)
+ggboxplot(a,
+          x = "group", y = "CDKN3",#可以画任何一个基因
+          fill = "group") +
+  scale_fill_lancet()+
+  stat_compare_means(comparisons = list(c(1, 2)),
+                     method = "wilcox.test",   #设置统计方法
+                     symnum.args=list(cutpoints = c(0, 0.001, 0.01, 0.05, 1),
+                                      symbols = c("***", "**", "*", "ns")))
+dev.off()
+
+
+####配对图绘制####
+setwd("TCGA-STAD")
+setwd("T_N_DEG")
+library(tidyverse)
+#读取文件
+tpms01A_log2 = read.table("tpms01A_log2.txt",sep = "\t",row.names = 1,check.names = F,stringsAsFactors = F,header = T)
+tpms11A_log2 = read.table("tpms11A_log2.txt",sep = "\t",row.names = 1,check.names = F,stringsAsFactors = F,header = T)
+tpms01A_log2 <- tpms01A_log2 %>% t() %>% as.data.frame()
+tpms11A_log2 <- tpms11A_log2 %>% t() %>% as.data.frame()
+rownames(tpms01A_log2) <- substring(rownames(tpms01A_log2),1,12)
+rownames(tpms11A_log2) <- substring(rownames(tpms11A_log2),1,12)
+a <- intersect(rownames(tpms01A_log2),rownames(tpms11A_log2))
+
+tpms01A_log2 <- tpms01A_log2[a,]
+tpms11A_log2 <- tpms11A_log2[a,]
+
+CDKN3 <- cbind(tpms11A_log2$CDKN3,tpms01A_log2$CDKN3)#11A放在前面
+CDKN3 <- as.data.frame(CDKN3)
+write.csv(CDKN3,file = "CDKN3_peidui.csv")
+#仙桃学术画图
+#R语言怎么画？这是给大家学完Bulk课程后的一个任务
+
+#####根据基因表达把肿瘤样本分高低组进行差异分析####
+#CDKN3差异分析
+setwd("..")
+setwd("TCGA-STAD")
+setwd("CDKN3_DEG")
+library(DESeq2)
+library(tidyverse)
+counts_01A <- read.table("counts01A.txt",sep = "\t",row.names = 1,check.names = F,stringsAsFactors = F,header = T)
+exp <- read.table("tpms01A_log2.txt", sep = "\t",row.names = 1,check.names = F,header = T)
+identical(colnames(counts_01A),colnames(exp))#习惯性判断以防万一
+gene <- "CDKN3"#每次运行只改这个基因名
+class(exp$`TCGA-BR-6457-01A`)
+
+med=median(as.numeric(exp[gene,]))
+#为什么要as.numeric
+a <- exp[gene,]
+a <- as.numeric(a)
+#四分位数
+quantile(a)
+
+conditions=data.frame(sample=colnames(exp),
+                      group=factor(ifelse(exp[gene,]>med,"high","low"),levels = c("low","high"))) %>% 
+  column_to_rownames("sample")
+
+dds <- DESeqDataSetFromMatrix(
+  countData = counts_01A,
+  colData = conditions,
+  design = ~ group)
+
+dds <- DESeq(dds)
+
+resultsNames(dds)
+res <- results(dds)
+save(res,file="DEG_CDKN3.Rda")
+
+####CDKN3差异分析热图展示####
+setwd("TCGA-STAD")
+setwd("CDKN3_DEG")
+library(tidyverse)
+exp <- read.table("tpms01A_log2.txt",sep = "\t",row.names = 1,check.names = F,stringsAsFactors = F,header = T)
+#读取差异分析rda文件
+#DEG <- as.data.frame(res)%>% arrange(padj)
+DEG <- as.data.frame(res)
+DEG <- arrange(DEG,padj)
+DEG <- na.omit(DEG)
+
+
+logFC_cutoff <- 1
+type1 = (DEG$padj < 0.05)&(DEG$log2FoldChange < -logFC_cutoff)
+type2 = (DEG$padj < 0.05)&(DEG$log2FoldChange > logFC_cutoff)
+DEG$change = ifelse(type1,"DOWN",ifelse(type2,"UP","NOT"))
+table(DEG$change)
+#下载pheatmap包 两种方法
+library(pheatmap)
+a <- filter(DEG,change == 'UP')
+b <- filter(DEG,change == 'DOWN')
+c <- rbind(a,b)
+d <- rownames(c)
+#提取差异基因表达谱
+exp_diff <- exp[d,]
+##数据处理完毕 以上是精华需要掌握 以下直接跑即可
+#设置分组信息
+group_list=factor(ifelse(exp[gene,]>med,"high","low"),levels = c("low","high"))
+annotation_col=data.frame(group=group_list)
+rownames(annotation_col)=colnames(exp_diff)
+#设置分组信息方法二
+#annotation_col <- conditions
+
+a <- filter(annotation_col,group == 'high')
+b <- filter(annotation_col,group == 'low')
+exp_diff_high <- exp_diff[,rownames(a)]
+exp_diff_low <- exp_diff[,rownames(b)]
+exp_diff <- cbind(exp_diff_high,exp_diff_low)
+
+#annotation_col <- arrange(annotation_col,group)
+#exp_diff <- exp_diff[,rownames(annotation_col)]
+#开始画图
+pheatmap(exp_diff,
+         annotation_col=annotation_col,
+         scale = "row",
+         show_rownames = F,
+         show_colnames =F,
+         color = colorRampPalette(c("navy", "white", "red"))(50),
+         cluster_cols =F,
+         cluster_rows = F,
+         fontsize = 10,
+         fontsize_row=5,
+         fontsize_col=3)
+#保存图片 调整大小
+dev.off()#关闭画板
+
+####CDKN3差异分析火山图展示####
+#现场操作给大家看
+#下面直接跑即可
+library(ggpubr)
+library(ggthemes)
+DEG$logP <- -log10(DEG$padj)#为什么要-log呢 数学原理
+#初步图片
+ggscatter(DEG,
+          x = "log2FoldChange", y = "logP") +
+  theme_base()
+
+#增加基因上下调信息
+ggscatter(DEG, x = "log2FoldChange", y = "logP",
+          color = "change",
+          palette = c("blue", "black", "red"),
+          size = 1) +
+  theme_base()
+
+#添加分界线
+ggscatter(DEG, x = "log2FoldChange", y = "logP", xlab = "log2FoldChange",
+          ylab = "-log10(Adjust P-value)",
+          color = "change",
+          palette = c("blue", "black", "red"),
+          size = 1) +
+  theme_base() +
+  geom_hline(yintercept = -log10(0.05), linetype = "dashed") +
+  geom_vline(xintercept = c(-1, 1), linetype = "dashed")
+dev.off()
+
+####富集分析（用CDKN3的差异基因做）####
+####GO####
+setwd("TCGA-LAML")
+setwd("go")
+library(tidyverse)
+library("BiocManager")
+#安装加载包
+#chooseBioCmirror()
+#BiocManager::install('clusterProfiler')
+#BiocManager::install('org.Hs.eg.db')
+library(org.Hs.eg.db)
+#org.Hs.eg.db包主要注释人类基因:用于不同数据库ID间的转化
+library(clusterProfiler)
+#导入差异基因文件
+DEG <- as.data.frame(res)%>% 
+  arrange(padj) %>% 
+  dplyr::filter(abs(log2FoldChange) > 1, padj < 0.05)
+
+DEG <- DEG %>% rownames_to_column("SYMBOL")
+
+genelist <- bitr(DEG$SYMBOL, fromType="SYMBOL",
+                 toType="ENTREZID", OrgDb='org.Hs.eg.db')
+DEG <- inner_join(DEG,genelist,by="SYMBOL")
+
+#GO分析
+ego <- enrichGO(gene = DEG$ENTREZID,
+                OrgDb = org.Hs.eg.db, 
+                ont = "all",
+                pAdjustMethod = "BH",
+                minGSSize = 1,
+                pvalueCutoff =0.05, 
+                qvalueCutoff =0.05,
+                readable = TRUE)
+
+ego_res <- ego@result
+save(ego,ego_res,file = "GO_CDKN3_DEG.Rda")
+
+#3. 可视化
+##3.1 柱状图
+barplot(ego, showCategory = 10,color = "pvalue")
+##3.2 气泡图
+dotplot(ego, showCategory = 10)
+##3.3 分类展示
+barplot(ego, drop = TRUE, showCategory =10,split="ONTOLOGY") + 
+  facet_grid(ONTOLOGY~., scale='free')
+dotplot(ego,showCategory = 10,split="ONTOLOGY") + 
+  facet_grid(ONTOLOGY~., scale='free')
+dev.off()
+##3.4 网络图
+#install.packages("ggnewscale")
+library(ggnewscale)
+List = DEG$log2FoldChange
+names(List)= DEG$ENTREZID
+head(List)
+List = sort(List,decreasing = T)
+
+cnetplot(ego, categorySize="pvalue", foldChange = List,colorEdge = TRUE)
+##3.5 网络图2
+cnetplot(ego, foldChange = List, circular = TRUE, colorEdge = TRUE)
+##3.6 热图
+heatplot(ego,foldChange = List)
+#GO原理
+
+####KEGG####
+kk <- enrichKEGG(gene         = DEG$ENTREZID,
+                 organism     = 'hsa',
+                 pvalueCutoff = 0.1,
+                 qvalueCutoff =0.1)
+kk=DOSE::setReadable(kk, OrgDb='org.Hs.eg.db',keyType='ENTREZID')
+kk_res <- kk@result
+save(kk,kk_res,file = "KEGG_CDKN3_DEG.Rda")
+
+#3. 可视化
+##3.1 柱状图
+barplot(kk, showCategory = 10,color = "pvalue")
+##3.2 气泡图
+dotplot(kk, showCategory = 10)
+dev.off()
+##3.3 网络图
+List = DEG$log2FoldChange
+names(List)= DEG$ENTREZID
+List = sort(List,decreasing = T)
+
+cnetplot(kk, categorySize="pvalue", foldChange = List,colorEdge = TRUE)
+##3.4 网络图2
+cnetplot(kk, foldChange = List, circular = TRUE, colorEdge = TRUE)
+##3.5 热图
+heatplot(kk,foldChange = List)
+
+####GSEA####
+setwd("TCGA-STAD")
+setwd("FUJI_CDKN3_DEG")
+library(tidyverse)
+library("BiocManager")
+library(org.Hs.eg.db)
+library(clusterProfiler)
+#GSEA转换不转换都可以#
+####转换ID版本####
+#双击打开差异分析文件
+DEG <- as.data.frame(res)%>% 
+  arrange(padj)
+DEG <- na.omit(DEG)
+
+DEG <- DEG %>% rownames_to_column("Gene")
+
+genelist <- bitr(DEG$Gene, fromType="SYMBOL",
+                 toType="ENTREZID", OrgDb='org.Hs.eg.db')
+DEG <- inner_join(DEG,genelist,by=c("Gene"="SYMBOL"))
+
+#https://zhuanlan.zhihu.com/p/504101161
+msigdb_GMTs <- "msigdb_v7.0_GMTs"
+msigdb <- "h.all.v7.0.entrez.gmt" #可更改
+
+
+#读取上面指定的gmt文件
+kegmt <- read.gmt(file.path(msigdb_GMTs,msigdb))
+table(kegmt$term)
+geneList = DEG[,3]#为什么提取出来变成数值了
+class(DEG$ENTREZID)
+names(geneList) = as.character(DEG[,'ENTREZID'])
+head(geneList)
+geneList = sort(geneList, decreasing = TRUE)
+head(geneList)
+set.seed(1) #设置种子 好像不设置也没区别
+gsea <-GSEA(geneList,TERM2GENE = kegmt) #GSEA分析
+#转换成数据框
+gsea_result_df <- as.data.frame(gsea)
+write.table(gsea_result_df,file="GSEA_hallmark_CDKN3_result.txt",sep = "\t",row.names = T,col.names = NA,quote = F)
+save(gsea,gsea_result_df,file = "GSEA_CDKN3.rda")
+#单个图绘制
+#安装enrichplot
+library(enrichplot)
+gseaplot2(gsea,8,color="red",pvalue_table = T)
+#多个结果绘制
+gseaplot2(gsea, geneSetID = c(8,10,12), subplots = 1:3)
+gseaplot2(gsea, geneSetID = 1:3, subplots = 1:3)
+
+dev.off()
+
+####不转换ID版本####
+#双击打开差异分析文件
+DEG <- as.data.frame(res)%>% arrange(padj) 
+DEG <- na.omit(DEG)
+DEG <- DEG %>% rownames_to_column("Gene")
+
+msigdb_GMTs <- "msigdb_v7.0_GMTs"
+msigdb <- "c2.cp.kegg.v7.0.symbols.gmt"  
+#读取上面指定的gmt文件
+kegmt <- read.gmt(file.path(msigdb_GMTs,msigdb))
+
+geneList = DEG[,3]
+names(geneList) = as.character(DEG[,'Gene'])
+head(geneList)
+geneList = sort(geneList, decreasing = TRUE)
+head(geneList)
+
+set.seed(1) #设置种子 好像不设置也没区别
+gsea <-GSEA(geneList,TERM2GENE = kegmt) #GSEA分析
+#转换成数据框
+gsea_result_df <- as.data.frame(gsea)
+write.table(gsea_result_df,file="GSEA_hallmark_CDKN3_result.txt",sep = "\t",row.names = T,col.names = NA,quote = F)
+save(gsea,gsea_result_df,file = "GSEA_CDKN3.rda")
+#单个图绘制
+#安装enrichplot
+library(enrichplot)
+gseaplot2(gsea,3,color="red",pvalue_table = T)
+#多个结果绘制
+gseaplot2(gsea, geneSetID = c(1,3), subplots = 1:3)
+gseaplot2(gsea, geneSetID = 1:6, subplots = 1:2)
+
+dev.off()
+#GSEA原理
+
+####作业2####
+#画BTK在LUAD肿瘤组织和正常组织表达差异柱状图和配对图
+#根据BTK表达中位数将LUAD肿瘤样本分成BTK表达高组和低组 做差异分析
+#BTK_DEG GSEA h.all
+
+####Class4####
+####ESTIMATE####
+#计算患者免疫评分与肿瘤纯度#
+setwd("TCGA-STAD")
+setwd("ESTIMATE")  #设置工作目录
+#安装包
+library(utils) #这个包应该不用下载，自带的
+#rforge <- "http://r-forge.r-project.org"
+#install.packages("estimate", repos=rforge, dependencies=TRUE)
+library(estimate)
+library(tidyverse)
+#读取肿瘤患者01A表达谱
+exp <- read.table("tpms01A_log2.txt",sep = "\t",row.names = 1,check.names = F,stringsAsFactors = F,header = T)
+
+#计算免疫评分
+filterCommonGenes(input.f = "tpms01A_log2.txt",   #输入文件名
+                  output.f = "tpms01A_log2.gct",   #输出文件名
+                  id = "GeneSymbol")   #行名为gene symbol
+estimateScore("tpms01A_log2.gct",   #刚才的输出文件名
+              "tpms01A_log2_estimate_score.txt",   #新的输出文件名（即估计的结果文件）
+              platform="affymetrix")   #默认平台
+
+#提取结果
+ESTIMATE_result <- read.table("tpms01A_log2_estimate_score.txt",sep = "\t",row.names = 1,check.names = F,stringsAsFactors = F,header = T)
+ESTIMATE_result <- ESTIMATE_result[,-1]   
+colnames(ESTIMATE_result) <- ESTIMATE_result[1,]   
+ESTIMATE_result <- as.data.frame(t(ESTIMATE_result[-1,]))
+rownames(ESTIMATE_result) <- colnames(exp)
+write.table(ESTIMATE_result, file = "ESTIMATE_result.txt",sep = "\t",row.names = T,col.names = NA,quote = F) 
+
+#仙桃绘图
+med=median(as.numeric(exp["CDKN3",]))
+exp <- exp %>% t() %>% as.data.frame()
+exp <- exp %>% mutate(group=factor(ifelse(exp$CDKN3>med,"high","low"),levels = c("low","high")))
+class(exp$group)
+identical(rownames(exp),rownames(ESTIMATE_result))
+
+ESTIMATE_result$group <- exp$group
+
+ESTIMATE_high <- ESTIMATE_result %>% filter(group == "high")
+ESTIMATE_low <- ESTIMATE_result %>% filter(group == "low")
+
+write.csv(ESTIMATE_high, file = "ESTIMATE_high.csv")
+write.csv(ESTIMATE_low, file = "ESTIMATE_low.csv")
+#如何用R绘图？
+library(ggpubr)
+library(ggsci)
+ggboxplot(ESTIMATE_result,
+          x = "group", y = "TumorPurity",#可以画任何一个基因
+          fill = "group") +
+  scale_fill_lancet()+
+  stat_compare_means(comparisons = list(c(1, 2)),
+                     method = "wilcox.test",   #设置统计方法
+                     symnum.args=list(cutpoints = c(0, 0.001, 0.01, 0.05, 1),
+                                      symbols = c("***", "**", "*", "ns")))
+dev.off()
+
+
+####cibersort####
+setwd("TCGA-STAD")
+setwd("CIBERSORT")   
+#install.packages('e1071')
+#install.packages('parallel')
+#install.packages("BiocManager")
+#BiocManager::install("preprocessCore", version = "3.17")
+library(e1071)
+library(parallel)
+library(preprocessCore)
+library(tidyverse)
+source("CIBERSORT.R")   
+sig_matrix <- "LM22.txt"   
+mixture_file = 'tpms01A_log2.txt'   #肿瘤患者表达谱
+res_cibersort <- CIBERSORT(sig_matrix, mixture_file, perm=100, QN=TRUE)
+
+res_cibersort <- res_cibersort[,1:22]   
+ciber.res <- res_cibersort[,colSums(res_cibersort) > 0]   #去除丰度全为0的细胞
+ciber.res <- as.data.frame(ciber.res)
+write.table(ciber.res,"ciber.res.txt",sep = "\t",row.names = T,col.names = NA,quote = F)
+
+####cibersort彩虹图 无需掌握####
+mycol <- ggplot2::alpha(rainbow(ncol(ciber.res)), 0.7) #创建彩虹色板（带70%透明度）
+par(bty="o", mgp = c(2.5,0.3,0), mar = c(2.1,4.1,2.1,10.1),tcl=-.25,las = 1,xpd = F)
+barplot(as.matrix(t(ciber.res)),
+        border = NA, # 柱子无边框
+        names.arg = rep("",nrow(ciber.res)), # 无横坐标样本名
+        yaxt = "n", # 先不绘制y轴
+        ylab = "Relative percentage", # 修改y轴名称
+        col = mycol) # 采用彩虹色板
+axis(side = 2, at = c(0,0.2,0.4,0.6,0.8,1), # 补齐y轴添加百分号
+     labels = c("0%","20%","40%","60%","80%","100%"))
+legend(par("usr")[2]-20, # 
+       par("usr")[4], 
+       legend = colnames(ciber.res), 
+       xpd = T,
+       fill = mycol,
+       cex = 0.6, 
+       border = NA, 
+       y.intersp = 1,
+       x.intersp = 0.2,
+       bty = "n")
+dev.off()   #关闭画板
+
+####分组比较图####
+#读取肿瘤患者01A表达谱
+exp <- read.table("tpms01A_log2.txt",sep = "\t",row.names = 1,check.names = F,stringsAsFactors = F,header = T)
+med=median(as.numeric(exp["CDKN3",]))
+exp <- exp %>% t() %>% as.data.frame()
+exp <- exp %>% mutate(group=factor(ifelse(exp$CDKN3>med,"high","low"),levels = c("low","high")))
+class(exp$group)
+a <- ciber.res
+identical(rownames(a),rownames(exp))
+a$group <- exp$group
+a <- a %>% rownames_to_column("sample")
+library(ggsci)
+library(tidyr)
+library(ggpubr)
+b <- gather(a,key=CIBERSORT,value = Fraction,-c(group,sample))
+ggboxplot(b, x = "CIBERSORT", y = "Fraction",
+          fill = "group", palette = "jco")+
+  stat_compare_means(aes(group = group),
+                     method = "wilcox.test",
+                     label = "p.signif",
+                     symnum.args=list(cutpoints = c(0, 0.001, 0.01, 0.05, 1),
+                                      symbols = c("***", "**", "*", "ns")))+
+  theme(text = element_text(size=10),
+        axis.text.x = element_text(angle=45, hjust=1)) 
+
+dev.off()
+
+####ssGSEA####
+setwd("TCGA-STAD")
+setwd("ssGSEA")
+#BiocManager::install('GSVA')
+library(tidyverse)
+library(data.table)
+library(GSVA)
+
+##1.3 表达量矩阵的准备
+###行是基因，列是样本
+expr <- read.table("tpms01A_log2.txt", sep = "\t",row.names = 1,check.names = F,header = T)
+expr <- as.matrix(expr)   #将expr转换为矩阵格式
+
+#2. 使用ssGSEA量化免疫浸润
+gsva_data <- gsva(expr,cellMarker, method = "ssgsea")
+a <- gsva_data %>% t() %>% as.data.frame()
+write.table(a,"ssGSEA_res.txt",sep = "\t",row.names = T,col.names = NA,quote = F)
+
+#设置分组信息 CDKN3高低组
+library(tidyverse)
+exp <- read.table("tpms01A_log2.txt", sep = "\t",row.names = 1,check.names = F,header = T)
+med=median(as.numeric(exp["CDKN3",]))
+exp <- exp %>% t() %>% as.data.frame()
+exp <- exp %>% mutate(group=factor(ifelse(exp$CDKN3>med,"high","low"),levels = c("low","high")))
+class(exp$group)
+identical(rownames(a),rownames(exp))
+a$group <- exp$group
+a <- a %>% rownames_to_column("sample")
+library(ggsci)
+library(tidyr)
+library(ggpubr)
+b <- gather(a,key=ssGSEA,value = Expression,-c(group,sample))
+
+ggboxplot(b, x = "ssGSEA", y = "Expression",
+          fill = "group", palette = "lancet")+
+  stat_compare_means(aes(group = group),
+                     method = "wilcox.test",
+                     label = "p.signif",
+                     symnum.args=list(cutpoints = c(0, 0.001, 0.01, 0.05, 1),
+                                      symbols = c("***", "**", "*", "ns")))+
+  theme(text = element_text(size=10),
+        axis.text.x = element_text(angle=45, hjust=1)) 
+
+dev.off()
+
+####X cell####
+#安装devtools 右下角install
+#安装xCell包
+#chooseBioCmirror()
+#devtools::install_github('dviraran/xCell')
+library(xCell)
+library(ggpubr)
+library(tidyverse)
+setwd("TCGA-STAD")
+setwd("Xcell")
+exp <- read.table("tpms01A_log2.txt",sep = "\t",row.names = 1,check.names = F,stringsAsFactors = F,header = T)
+#查看细胞类型
+celltypeuse<-xCell.data$spill$K
+
+Xcell_res <-xCellAnalysis(exp,parallel.sz=10) #计算
+Xcell_res <- Xcell_res %>% t() %>% as.data.frame()
+write.table(Xcell_res,"Xcell_res.txt",sep = "\t",row.names = T,col.names = NA,quote = F)
+
+a <- Xcell_res
+#准备分组信息
+med=median(as.numeric(exp["CDKN3",]))
+exp <- exp %>% t() %>% as.data.frame()
+exp <- exp %>% mutate(group=factor(ifelse(exp$CDKN3>med,"high","low"),levels = c("low","high")))
+class(exp$group)
+identical(rownames(a),rownames(exp))
+a$group <- exp$group
+a <- a %>% rownames_to_column("sample")
+library(ggsci)
+library(tidyr)
+library(ggpubr)
+b <- gather(a,key=xCell,value = Expression,-c(group,sample))
+
+ggboxplot(b, x = "xCell", y = "Expression",
+          fill = "group", palette = "lancet")+
+  stat_compare_means(aes(group = group),
+                     method = "wilcox.test",
+                     label = "p.signif",
+                     symnum.args=list(cutpoints = c(0, 0.001, 0.01, 0.05, 1),
+                                      symbols = c("***", "**", "*", "ns")))+
+  theme(text = element_text(size=10),
+        axis.text.x = element_text(angle=45, hjust=1)) 
+
+dev.off()
+
+####免疫检查点表达差异####
+#T细胞激活的二个信号
+#1、Tcell的TCR-CD3与MHC-抗原肽复合物结合
+#2、Tcell表面的CD28与APC表面的B7结合
+#CTLA4与CD28竞争 与B7结合 诱导无反应性Tcell
+#PD1-PDL1/PDL2
+#癌细胞逃避免疫系统摧毁的一种方法，是通过配体联接到T细胞的PD-1蛋白上
+#当配体与PD-1联接以后，T细胞就不能够发现肿瘤和向免疫系统发出攻击肿瘤的信号
+#PD1药物的设计思路是：给予肿瘤患者针对PD-1或PD-L1的一种抗体蛋白质，将使两种蛋白质不会联接，T细胞的功能也不会关停
+#PD1抗体(immune checkpoint blockade,ICB)
+setwd("TCGA-STAD")
+setwd("ICB")
+library(tidyverse)
+exp <- read.table("tpms01A_log2.txt",sep = "\t",row.names = 1,check.names = F,stringsAsFactors = F,header = T)
+
+med=median(as.numeric(exp["CDKN3",]))
+exp <- exp %>% t() %>% as.data.frame()
+exp <- exp %>% mutate(group=factor(ifelse(exp$CDKN3>med,"high","low"),levels = c("low","high")))
+class(exp$group)
+
+exp_high <- exp %>% filter(group == "high")
+exp_low <- exp %>% filter(group == "low")
+
+range(exp_high$CDKN3)
+range(exp_low$CDKN3)
+
+gene <- c("PD1","PDL1","PDL2")
+gene_high <- exp_high[,gene]
+gene_low <- exp_low[,gene]
+#为什么提取不出来
+#https://www.ncbi.nlm.nih.gov/
+gene <- c("PDCD1","CD274","PDCD1LG2")
+gene_high <- exp_high[,gene]
+gene_low <- exp_low[,gene]
+#导出csv仙桃作图
+write.csv(gene_high, file = "gene_high.csv")
+write.csv(gene_low, file = "gene_low.csv")
+
+#R作图
+library(tidyverse)
+exp <- read.table("tpms01A_log2.txt", sep = "\t",row.names = 1,check.names = F,header = T)
+med=median(as.numeric(exp["CDKN3",]))
+exp <- exp %>% t() %>% as.data.frame()
+exp <- exp %>% mutate(group=factor(ifelse(exp$CDKN3>med,"high","low"),levels = c("low","high")))
+class(exp$group)
+gene <- c("PDCD1","CD274","PDCD1LG2","group")
+a <- exp[,gene]
+a <- a %>% rownames_to_column("sample")
+library(ggsci)
+library(tidyr)
+library(ggpubr)
+b <- gather(a,key=ICB,value = Expression,-c(group,sample))
+
+ggboxplot(b, x = "ICB", y = "Expression",
+          fill = "group", palette = "jco")+
+  stat_compare_means(aes(group = group),
+                     method = "wilcox.test",
+                     label = "p.signif",
+                     symnum.args=list(cutpoints = c(0, 0.001, 0.01, 0.05, 1),
+                                      symbols = c("***", "**", "*", "ns")))+
+  theme(text = element_text(size=10),
+        axis.text.x = element_text(angle=45, hjust=1)) 
+
+dev.off()
+
+####相关性热图####
+####基因表达与cibersort的相关性####
+setwd("TCGA-STAD")
+setwd("COR")
+#install.packages("corrplot")
+library(corrplot)
+library(ggcorrplot)
+library(tidyverse)
+expr <- read.table("tpms01A_log2.txt",sep = "\t",row.names = 1,check.names = F,stringsAsFactors = F,header = T)
+ciber <- read.table("ciber.res.txt",sep = "\t",row.names = 1,check.names = F,stringsAsFactors = F,header = T)
+#随机选10个基因示范
+exp <- expr[1:10,]
+#自选基因
+#gene <- c("","","")
+#exp <- expr[gene,]
+
+exp <- exp %>% t() %>% as.data.frame()
+identical(rownames(ciber),rownames(exp))
+#确认数据类型为数值
+class(exp$TSPAN6)
+class(ciber$`B cells naive`)
+
+cor <-sapply(ciber,function(x,y) cor(x,y,method="spearman"),exp)
+rownames(cor)<-colnames(exp)
+range(cor)
+
+corrplot(cor,
+         method = "square",#相关性矩阵展示的图形
+         col=colorRampPalette(c("#01468b","white","#ee0000"))(100),
+         addCoef.col = "black",#为相关系数添加颜色
+         tl.col="black",#设置文本标签的颜色
+         number.cex = 0.6,
+         tl.cex = 0.7,
+         cl.align = "l")
+
+####基因表达与ESTIMATE_result的相关性####
+#现场做给大家看
+setwd("TCGA-STAD")
+setwd("COR")
+#install.packages("corrplot")
+library(corrplot)
+library(ggcorrplot)
+library(tidyverse)
+expr <- read.table("tpms01A_log2.txt",sep = "\t",row.names = 1,check.names = F,stringsAsFactors = F,header = T)
+est <- read.table("ESTIMATE_result.txt",sep = "\t",row.names = 1,check.names = F,stringsAsFactors = F,header = T)
+#随机选10个基因示范
+exp <- expr[1:10,]
+#自选基因
+#gene <- c("","","")
+#exp <- expr[gene,]
+
+exp <- exp %>% t() %>% as.data.frame()
+identical(rownames(est),rownames(exp))
+#确认数据类型为数值
+class(exp$TSPAN6)
+class(est$StromalScore)
+
+cor <-sapply(est,function(x,y) cor(x,y,method="spearman"),exp)
+rownames(cor)<-colnames(exp)
+range(cor)
+
+corrplot(cor,
+         method = "square",#相关性矩阵展示的图形
+         col=colorRampPalette(c("#01468b","white","#ee0000"))(100),
+         addCoef.col = "black",#为相关系数添加颜色
+         tl.col="black",#设置文本标签的颜色
+         number.cex = 0.6,
+         tl.cex = 0.7,
+         cl.align = "l")
+
+#####自己和自己做相关性####
+cor <-sapply(ciber,function(x,y) cor(x,y,method="spearman"),ciber)
+rownames(cor)<-colnames(ciber)
+
+ggcorrplot(cor, 
+           hc.order = TRUE, #使用hc.order进行排序
+           type = "lower", #图片位置
+           outline.color = "white",#轮廓颜色
+           lab = TRUE,#true为在图上添加相关系数
+           ggtheme = ggplot2::theme_gray, #指ggplot2函数对象，默认值为thememinimal
+           colors = c("#01468b", "white", "#ee0000"))
+
+corrplot(cor,
+         method="pie",
+         col=colorRampPalette(c("#01468b","white","#ee0000"))(100),
+         type="upper",
+         addCoef.col = "black",
+         number.cex = 0.35,
+         tl.col="black", tl.srt=45,
+         tl.cex = 0.7,
+         diag=FALSE)
+#
+corrplot(cor, method = "square",tl.col="black",tl.cex = 0.7) # 方形
+corrplot(cor, method = "ellipse") # 椭圆形
+corrplot(cor, method = "number") # 数字
+corrplot(cor, method = "pie") # 饼图
+corrplot(cor, method = "shade") # 阴影
+corrplot(cor, method = "color") # 颜色
+
+#矩阵显示类型
+corrplot(cor, type = "lower") # 下三角矩阵
+corrplot(cor, type = "upper") # 上三角矩阵
+
+#绘制组合图形
+corrplot(cor, method = "square", 
+         type = "lower") # 下三角矩阵
+corrplot(cor, method = "pie", 
+         type = "upper") # 上三角矩阵
+
+####散点图绘制####
+####基因与基因相关性散点图####
+setwd("TCGA-STAD")
+setwd("sandian")
+exp = read.table("tpms01A_log2.txt",sep = "\t",row.names = 1,check.names = F,stringsAsFactors = F,header = T)
+#install.packages("ggstatsplot")
+library(ggstatsplot)
+library(tidyverse)
+exp <- exp %>% t() %>% as.data.frame()
+ggscatterstats(data = exp, #要分析的数据
+               y = CDKN3, #设置Y轴
+               x = PDCD1,#设置X轴
+               type = "nonparametric", 
+               margins = "both",#是否显示 边缘，默认为true                                      
+               xfill = "#01468b", #x轴边缘图形的颜色
+               yfill = "#ee0000", #y轴边缘图形的颜色
+               marginal.type = "densigram")#在图片坐标轴边缘添加图形类型
+
+####基因与cibersort相关性散点图####
+setwd("TCGA-STAD")
+setwd("sandian")
+exp = read.table("tpms01A_log2.txt",sep = "\t",row.names = 1,check.names = F,stringsAsFactors = F,header = T)
+ciber = read.table("ciber.res.txt",sep = "\t",row.names = 1,check.names = F,stringsAsFactors = F,header = T)
+ciber <- ciber %>% t() %>% as.data.frame()
+rownames(ciber) <- gsub(" ",".",rownames(ciber))
+identical(colnames(ciber),colnames(exp))
+exp_ciber <- rbind(exp,ciber)
+exp_ciber <- exp_ciber %>% t() %>% as.data.frame()
+#install.packages("ggstatsplot")
+library(ggstatsplot)
+library(tidyverse)
+ggscatterstats(data = exp_ciber, #要分析的数据
+               y = CDKN3, #设置Y轴
+               x = B.cells.naive,#设置X轴
+               type = "nonparametric", 
+               margins = "both",#是否显示 边缘，默认为true                                      
+               xfill = "#01468b", #x轴边缘图形的颜色
+               yfill = "#ee0000", #y轴边缘图形的颜色
+               marginal.type = "densigram")#在图片坐标轴边缘添加图形类型
+
+####基因与ESTIMATE相关性散点图####
+#现场做给大家看
+setwd("TCGA-STAD")
+setwd("sandian")
+exp = read.table("tpms01A_log2.txt",sep = "\t",row.names = 1,check.names = F,stringsAsFactors = F,header = T)
+est = read.table("ESTIMATE_result.txt",sep = "\t",row.names = 1,check.names = F,stringsAsFactors = F,header = T)
+exp <- exp %>% t() %>% as.data.frame()
+
+identical(rownames(est),rownames(exp))
+exp_est <- cbind(exp,est)
+
+#install.packages("ggstatsplot")
+library(ggstatsplot)
+library(tidyverse)
+ggscatterstats(data = exp_est, #要分析的数据
+               y = FGR, #设置Y轴
+               x = ImmuneScore,#设置X轴
+               type = "nonparametric", 
+               margins = "both",#是否显示 边缘，默认为true                                      
+               xfill = "#01468b", #x轴边缘图形的颜色
+               yfill = "#ee0000", #y轴边缘图形的颜色
+               marginal.type = "densigram")#在图片坐标轴边缘添加图形类型
+
+
+####作业3####
+#LUAD 计算肿瘤样本estimate 保存结果即可 无需作图
+#LUAD 计算肿瘤样本cibersort 画彩虹图 根据BTK分组画图
+#LUAD cibersort 自己和自己做相关性 绘图
+#LUAD BTK 和 cibersort里22个细胞做散点图 画22张图
+
+####Class5####
+####生存信息整理####
+####方法1####
+setwd("TCGA-STAD")
+setwd("Survival_data1")
+library(tidyverse)
+#双击打开stad.gdc_2022
+#提取临床信息
+clinical <- as.data.frame(expquery2@colData) %>% 
+  .[!duplicated(.$sample),]
+#拆解
+
+####方法2####
+#xena官网：https://xenabrowser.net/datapages/
+#下载生存信息
+setwd("TCGA-STAD")
+setwd("Survival_data2")
+library(tidyverse)
+tpms01A_log2 <- read.table("tpms01A_log2.txt", sep = "\t",row.names = 1,check.names = F,header = T)
+tpms11A_log2 <- read.table("tpms11A_log2.txt", sep = "\t",row.names = 1,check.names = F,header = T)
+#手动导入OS.txt取名survival
+survival <- survival[,2:3]
+survival <- survival %>% rownames_to_column('sample')
+survival$name <- paste0(survival$sample,'A')#paste粘贴、连接
+table(substring(survival$name,14,16))
+rownames(survival) <- survival$name
+survival <- survival[,2:3]
+##整理01A##
+a <- intersect(colnames(tpms01A_log2),rownames(survival))
+table(substr(a,14,16))
+exp_01A <- tpms01A_log2[,a]
+surv_01A <- survival[a,]
+exp_01A <- exp_01A %>% t() %>% as.data.frame()
+identical(rownames(exp_01A),rownames(surv_01A))
+exp_surv_01A <- cbind(surv_01A,exp_01A)
+##整理11A##
+b <- intersect(colnames(tpms11A_log2),rownames(survival))
+table(substr(b,14,16))
+exp_11A <- tpms11A_log2[,b]
+surv_11A <- survival[b,]
+exp_11A <- exp_11A %>% t() %>% as.data.frame()
+identical(rownames(exp_11A),rownames(surv_11A))
+exp_surv_11A <- cbind(surv_11A,exp_11A)
+##整理01A+11A##
+identical(colnames(exp_surv_11A),colnames(exp_surv_01A))
+exp_surv <- rbind(exp_surv_01A,exp_surv_11A)
+##保存文件##
+write.table(surv_01A,"surv_01A.txt",sep = "\t",row.names = T,col.names = NA,quote = F)
+write.table(surv_11A,"surv_11A.txt",sep = "\t",row.names = T,col.names = NA,quote = F)
+write.table(exp_surv_01A,"exp_surv_01A.txt",sep = "\t",row.names = T,col.names = NA,quote = F)
+write.table(exp_surv_11A,"exp_surv_11A.txt",sep = "\t",row.names = T,col.names = NA,quote = F)
+write.table(exp_surv,"exp_surv.txt",sep = "\t",row.names = T,col.names = NA,quote = F)
+
+####ROC######
+setwd("TCGA-STAD")
+setwd("ROC")
+#install.packages('pROC')
+library(pROC)
+library(tidyverse)
+rt <- read.table("exp_surv_01A.txt", sep = "\t",row.names = 1,check.names = F,header = T)
+class(rt$OS)
+rt$OS <- as.character(rt$OS)
+class(rt$OS)
+rt$Type <- ifelse(str_detect(rt$OS, "0"), "alive","dead")
+#rt$Type <- ifelse(rt$OS == "0", "alive","dead")
+ROC1 <- roc(rt$Type, rt$CDKN3,
+            levels = c("alive", "dead"))
+plot(ROC1,
+     add = FALSE,   #不添加至上一图层
+     col = 'red',   #设置曲线颜色
+     legacy.axes = TRUE,   #使x轴变为1-Specificity
+     xlab = "1-Specificity",
+     print.auc =TRUE,
+     print.auc.x = 0.5,   #输出auc值的x轴位置
+     print.auc.y = 0.5,   #输出auc值的y轴位置
+     auc.polygon = TRUE,   #将auc曲线下面积转换为多边形
+     auc.polygon.col = "#fff7f7",   #设置多边形的填充色
+     grid = c(0.5, 0.2),   #设置两轴网格线的间隔为0.5，0.2
+     grid.col = c("black", "black"),   #设置两轴网格线的颜色
+     print.thres = TRUE)
+
+
+####timeROC####
+setwd("TCGA-STAD")
+setwd("timeROC")
+#准备R包
+#install.packages("timeROC")
+#install.packages("survival")
+library(timeROC)
+library(survival)
+library(tidyverse)
+
+#2.2 数据的整理与载入
+exp_surv_01A <- read.table("exp_surv_01A.txt", header=T,sep="\t", check.names=F, row.names=1)
+exp_surv_01A$OS.time <- exp_surv_01A$OS.time/365
+exp_surv_01A_year <- exp_surv_01A
+write.table(exp_surv_01A_year, file = "exp_surv_01A_year.txt",sep = "\t",row.names = T,col.names = NA,quote = F)
+#exp_surv_01A_year <- read.table("exp_surv_01A_year.txt", header=T,sep="\t", check.names=F, row.names=1)
+#2.3 构建ROC曲线函数
+ROC3 <- timeROC(T=exp_surv_01A_year$OS.time,   #结局时间
+                delta=exp_surv_01A_year$OS,   #结局指标
+                marker=exp_surv_01A_year$CDKN3,   #预测变量
+                cause=1,   #阳性结局指标数值
+                weighting="marginal",   #计算方法，默认为marginal
+                times=c(1, 2, 3),   #时间点，选取1年，3年和5年的生存率
+                iid=TRUE)
+ROC3   #查看模型变量信息
+
+#2.4 绘制ROC曲线
+plot(ROC3,
+     time=1, col="red")   #time是时间点，col是线条颜色
+plot(ROC3,
+     time=2, col="green", add=TRUE)   #add指是否添加在上一张图中
+plot(ROC3,
+     time=3, col="blue", add=TRUE)
+legend("bottomright",
+       c("Year-1", "Year-2", "Year-3"),
+       col=c("red", "green", "blue"),
+       lty=1, lwd=2)   #添加标签信息
+
+dev.off()
+
+####根据基因高低组做生存分析####
+setwd("TCGA-STAD")
+setwd("survival")
+surv <- read.table("exp_surv_01A_year.txt",sep = "\t",row.names = 1,check.names = F,stringsAsFactors = F,header = T)
+surv$OS.time <- surv$OS.time*12
+write.table(surv, file = "exp_surv_01A_month.txt",sep = "\t",row.names = T,col.names = NA,quote = F)
+
+#surv <- read.table("exp_surv_01A_month.txt", sep = "\t",row.names = 1,check.names = F,header = T)
+
+#median
+surv$group <- ifelse(surv$CDKN3 > median(surv$CDKN3),"High","Low")
+surv$group <- factor(surv$group, levels = c("Low","High")) 
+#surv$group <- factor(ifelse(surv$CDKN3 > median(surv$CDKN3),"High","Low"), levels = c("Low","High")) 
+
+class(surv$group)
+table(surv$group)
+#install.packages("survival")
+library(survival)
+fitd <- survdiff(Surv(OS.time, OS) ~ group,
+                 data      = surv,
+                 na.action = na.exclude)
+pValue <- 1 - pchisq(fitd$chisq, length(fitd$n) - 1)
+
+#2.2 拟合生存曲线
+fit <- survfit(Surv(OS.time, OS)~ group, data = surv)
+summary(fit)
+p.lab <- paste0("P", ifelse(pValue < 0.001, " < 0.001", paste0(" = ",round(pValue, 3))))
+#install.packages("survminer")
+library(survminer)
+ggsurvplot(fit,
+           data = surv,
+           pval = p.lab,
+           conf.int = TRUE, # 显示置信区间
+           risk.table = TRUE, # 显示风险表
+           risk.table.col = "strata",
+           palette = "jco", # 配色采用jco
+           legend.labs = c("Low", "High"), # 图例
+           size = 1,
+           xlim = c(0,100), # x轴长度，一般为0-10年
+           break.time.by = 20, # x轴步长为20个月
+           legend.title = "",
+           surv.median.line = "hv", # 限制垂直和水平的中位生存
+           ylab = "Survival probability (%)", # 修改y轴标签
+           xlab = "Time (Months)", # 修改x轴标签
+           ncensor.plot = TRUE, # 显示删失图块
+           ncensor.plot.height = 0.25,
+           risk.table.y.text = FALSE)
+dev.off()
+
+####cox回归分析####
+####单因素####
+#设置工作目录
+setwd("TCGA-STAD")
+setwd("uni_cox")
+#安装加载R包
+#install.packages("survival")
+#install.packages("forestplot")
+library(survival)
+library(forestplot)
+library(tidyverse)
+#读取文件
+exp_surv_01A = read.table("exp_surv_01A.txt",sep = "\t",row.names = 1,check.names = F,stringsAsFactors = F,header = T)
+#读取TCGA 肿瘤/正常差异分析结果 load
+DEG <- as.data.frame(res)%>% 
+  arrange(padj) %>% 
+  dplyr::filter(abs(log2FoldChange) > 3, padj < 0.05)
+#整合
+exp_deg_01A <- exp_surv_01A[,rownames(DEG)]
+a <- exp_surv_01A[,1:2]
+identical(rownames(a),rownames(exp_deg_01A))
+surv.expr <- cbind(a,exp_deg_01A)
+write.table(surv.expr, file = "surv.expr.txt",sep = "\t",row.names = T,col.names = NA,quote = F)
+#Cox分析
+#如何修改特定列的列名
+#colnames(surv.expr)[ ] <- " "  #[]内填特定列数字 ""内填写修改的名字
+Coxoutput <- NULL 
+
+for(i in 3:ncol(surv.expr)){
+  g <- colnames(surv.expr)[i]
+  cox <- coxph(Surv(OS.time,OS) ~ surv.expr[,i], data = surv.expr) # 单变量cox模型
+  coxSummary = summary(cox)
+  
+  Coxoutput <- rbind.data.frame(Coxoutput,
+                                data.frame(gene = g,
+                                           HR = as.numeric(coxSummary$coefficients[,"exp(coef)"])[1],
+                                           z = as.numeric(coxSummary$coefficients[,"z"])[1],
+                                           pvalue = as.numeric(coxSummary$coefficients[,"Pr(>|z|)"])[1],
+                                           lower = as.numeric(coxSummary$conf.int[,3][1]),
+                                           upper = as.numeric(coxSummary$conf.int[,4][1]),
+                                           stringsAsFactors = F),
+                                stringsAsFactors = F)
+}
+
+Coxoutput <- arrange(Coxoutput,pvalue)
+write.table(Coxoutput, file = "cox_results.txt",sep = "\t",row.names = T,col.names = NA,quote = F)
+
+###筛选基因
+gene_sig <- Coxoutput[which(Coxoutput$pvalue < 0.05),] # 取出p值小于0.05的基因
+#gene_sig <- filter(Coxoutput,pValue < 0.05)
+topgene <- gene_sig[1:10,]
+#3. 绘制森林图
+##3.1 输入表格的制作
+tabletext <- cbind(c("Gene",topgene$gene),
+                   c("HR",format(round(as.numeric(topgene$HR),3),nsmall = 3)),
+                   c("lower 95%CI",format(round(as.numeric(topgene$lower),3),nsmall = 3)),
+                   c("upper 95%CI",format(round(as.numeric(topgene$upper),3),nsmall = 3)),
+                   c("pvalue",format(round(as.numeric(topgene$p),3),nsmall = 3)))
+##3.2 绘制森林图
+forestplot(labeltext=tabletext,
+           mean=c(NA,as.numeric(topgene$HR)),
+           lower=c(NA,as.numeric(topgene$lower)), 
+           upper=c(NA,as.numeric(topgene$upper)),
+           graph.pos=5,# 图在表中的列位置
+           graphwidth = unit(.25,"npc"),# 图在表中的宽度比
+           fn.ci_norm="fpDrawDiamondCI",# box类型选择钻石
+           col=fpColors(box="#00A896", lines="#02C39A", zero = "black"),# box颜色
+           
+           boxsize=0.4,# box大小固定
+           lwd.ci=1,
+           ci.vertices.height = 0.1,ci.vertices=T,# 显示区间
+           zero=1,# zero线横坐标
+           lwd.zero=1.5,# zero线宽
+           xticks = c(0.5,1,1.5),# 横坐标刻度根据需要可随意设置
+           lwd.xaxis=2,
+           xlab="Hazard ratios",
+           txt_gp=fpTxtGp(label=gpar(cex=1.2),# 各种字体大小设置
+                          ticks=gpar(cex=0.85),
+                          xlab=gpar(cex=1),
+                          title=gpar(cex=1.5)),
+           hrzl_lines=list("1" = gpar(lwd=2, col="black"), # 在第一行上面画黑色实线
+                           "2" = gpar(lwd=1.5, col="black"), # 在第一行标题行下画黑色实线
+                           "12" = gpar(lwd=2, col="black")), # 在最后一行上画黑色实线
+           lineheight = unit(.75,"cm"),# 固定行高
+           colgap = unit(0.3,"cm"),
+           mar=unit(rep(1.5, times = 4), "cm"),
+           new_page = F
+)
+dev.off()
+
+####整理TCGA临床信息####
+setwd("TCGA-STAD")
+setwd("clinical")
+library(tidyverse)
+#双击打开stad.gdc_2022
+#提取临床信息
+clinical <- as.data.frame(expquery2@colData) %>%   
+  .[!duplicated(.$sample),]
+#提取需要的临床信息数据
+clinical <- clinical[,c("gender","age_at_index","ajcc_pathologic_stage",
+                        "ajcc_pathologic_t","ajcc_pathologic_n","ajcc_pathologic_m")]
+
+class(clinical$gender)
+class(clinical$age_at_index)
+class(clinical$ajcc_pathologic_stage)
+class(clinical$ajcc_pathologic_t)
+class(clinical$ajcc_pathologic_n)
+class(clinical$ajcc_pathologic_m)
+
+table(clinical$gender)
+table(clinical$age_at_index)
+table(clinical$ajcc_pathologic_stage)
+table(clinical$ajcc_pathologic_t)
+table(clinical$ajcc_pathologic_n)
+table(clinical$ajcc_pathologic_m)
+
+clinical$ajcc_pathologic_t <- gsub("a","",clinical$ajcc_pathologic_t)
+clinical$ajcc_pathologic_t <- gsub("b","",clinical$ajcc_pathologic_t)
+clinical$ajcc_pathologic_t <- gsub("TX",NA,clinical$ajcc_pathologic_t)
+
+clinical$ajcc_pathologic_n <- gsub("a","",clinical$ajcc_pathologic_n)
+clinical$ajcc_pathologic_n <- gsub("b","",clinical$ajcc_pathologic_n)
+clinical$ajcc_pathologic_n <- gsub("NX",NA,clinical$ajcc_pathologic_n)
+
+clinical$ajcc_pathologic_m <- gsub("MX",NA,clinical$ajcc_pathologic_m)
+
+clinical$ajcc_pathologic_stage <- gsub("A","",clinical$ajcc_pathologic_stage)
+clinical$ajcc_pathologic_stage <- gsub("B","",clinical$ajcc_pathologic_stage)
+clinical$ajcc_pathologic_stage <- gsub("C","",clinical$ajcc_pathologic_stage)
+
+
+
+clinical$gender <- as.factor(clinical$gender)
+clinical$ajcc_pathologic_t <- as.factor(clinical$ajcc_pathologic_t)
+clinical$ajcc_pathologic_n <- as.factor(clinical$ajcc_pathologic_n)
+clinical$ajcc_pathologic_m <- as.factor(clinical$ajcc_pathologic_m)
+clinical$ajcc_pathologic_stage <- as.factor(clinical$ajcc_pathologic_stage)
+
+#提取01A临床数据
+rownames(clinical) <- substring(rownames(clinical),1,16)
+clinical01A <- filter(clinical,substring(rownames(clinical),14,16) == '01A')
+
+##将基因表达谱和临床数据框合并并保存
+exp01A <- read.table("tpms01A_log2.txt",sep = "\t",row.names = 1,check.names = F,stringsAsFactors = F,header = T)
+
+#统一两数据框的样本保持一致
+clinical01A <- clinical01A[colnames(exp01A),]   
+identical(rownames(clinical01A),colnames(exp01A))
+write.table(clinical01A,"clinical01A.txt",sep = "\t",row.names = T,col.names = NA,quote = F)
+
+
+exp01A <- exp01A %>% t() %>% as.data.frame()
+
+identical(rownames(clinical01A),rownames(exp01A))
+
+
+clinical.expr01A <- cbind(clinical01A,exp01A)
+
+
+write.table(clinical.expr01A,"clinical.expr01A.txt",sep = "\t",row.names = T,col.names = NA,quote = F)
+
+
+#加入OS OS.time
+surv_01A <- read.table("surv_01A.txt",sep = "\t",row.names = 1,check.names = F,stringsAsFactors = F,header = T)
+
+identical(rownames(clinical.expr01A),rownames(surv_01A))
+
+exp_surv_clinical_01A <- cbind(surv_01A,clinical.expr01A)
+
+write.table(exp_surv_clinical_01A,"exp_surv_clinical_01A.txt",sep = "\t",row.names = T,col.names = NA,quote = F)
+
+
+####基因与临床特征相关性 绘制柱状图####
+setwd("TCGA-STAD")
+setwd("gene_clinical")
+library(tidyverse)
+clinical.expr01A <- read.table("clinical.expr01A.txt",sep = "\t",row.names = 1,check.names = F,stringsAsFactors = F,header = T)
+
+#用R语言画图
+clinical.expr01A <- na.omit(clinical.expr01A)
+
+clinical.expr01A$ajcc_pathologic_stage <- factor(clinical.expr01A$ajcc_pathologic_stage,levels = c("Stage I","Stage II","Stage III","Stage IV"))
+clinical.expr01A$ajcc_pathologic_t <- factor(clinical.expr01A$ajcc_pathologic_t,levels = c("T1","T2","T3","T4"))
+
+
+library(ggpubr)
+library(ggsci)
+ggboxplot(clinical.expr01A,
+          x = "ajcc_pathologic_stage", y = "CDKN3",
+          fill = "ajcc_pathologic_stage") +
+  scale_fill_jco()+
+  stat_compare_means(comparisons = list(c(1, 4),c(1,2),c(1,3)),
+                     method = "wilcox.test",   #设置统计方法
+                     symnum.args=list(cutpoints = c(0, 0.001, 0.01, 0.05, 1),
+                                      symbols = c("***", "**", "*", "ns")))
+dev.off()
+
+####TCGA 多因素COX####
+#设置工作目录
+setwd("TCGA-STAD")
+setwd("mul_cox")
+#安装加载R包
+#install.packages("survival")
+#install.packages("forestplot")
+library(survival)
+library(forestplot)
+library(tidyverse)
+#读取文件
+exp_surv_clinical_01A = read.table("exp_surv_clinical_01A.txt",sep = "\t",row.names = 1,check.names = F,stringsAsFactors = F,header = T)
+surv.expr <- exp_surv_clinical_01A #为了下面不改名字
+#Cox分析
+Coxoutput <- NULL 
+cox <- coxph(Surv(OS.time,OS) ~ gender + age_at_index + ajcc_pathologic_stage + 
+               ajcc_pathologic_t + ajcc_pathologic_n + ajcc_pathologic_m + CDKN3,
+             data = surv.expr) # 多变量cox模型
+coxSummary = summary(cox)
+
+Coxoutput <- rbind.data.frame(Coxoutput,
+                              data.frame(characteristics = rownames(coxSummary$coefficients),
+                                         HR = as.numeric(coxSummary$coefficients[,"exp(coef)"]),
+                                         z = as.numeric(coxSummary$coefficients[,"z"]),
+                                         pvalue = as.numeric(coxSummary$coefficients[,"Pr(>|z|)"]),
+                                         lower = as.numeric(coxSummary$conf.int[,3]),
+                                         upper = as.numeric(coxSummary$conf.int[,4]),
+                                         stringsAsFactors = F),
+                              stringsAsFactors = F)
+
+write.table(Coxoutput, file = "cox_results.txt",sep = "\t",row.names = F,col.names = T,quote = F)
+topgene <- Coxoutput
+#3. 绘制森林图
+##3.1 输入表格的制作
+tabletext <- cbind(c("characteristics",topgene$characteristics),
+                   c("HR",format(round(as.numeric(topgene$HR),3),nsmall = 3)),
+                   c("lower 95%CI",format(round(as.numeric(topgene$lower),3),nsmall = 3)),
+                   c("upper 95%CI",format(round(as.numeric(topgene$upper),3),nsmall = 3)),
+                   c("pvalue",format(round(as.numeric(topgene$p),3),nsmall = 3)))
+##3.2 绘制森林图
+forestplot(labeltext=tabletext,
+           mean=c(NA,as.numeric(topgene$HR)),
+           lower=c(NA,as.numeric(topgene$lower)), 
+           upper=c(NA,as.numeric(topgene$upper)),
+           graph.pos=5,# 图在表中的列位置
+           graphwidth = unit(.25,"npc"),# 图在表中的宽度比
+           fn.ci_norm="fpDrawDiamondCI",# box类型选择钻石
+           col=fpColors(box="#00A896", lines="#02C39A", zero = "black"),# box颜色
+           
+           boxsize=0.4,# box大小固定
+           lwd.ci=1,
+           ci.vertices.height = 0.1,ci.vertices=T,# 显示区间
+           zero=1,# zero线横坐标
+           lwd.zero=1.5,# zero线宽
+           xticks = c(1),# 横坐标刻度根据需要可随意设置
+           lwd.xaxis=2,
+           xlab="Hazard ratios",
+           txt_gp=fpTxtGp(label=gpar(cex=1.2),# 各种字体大小设置
+                          ticks=gpar(cex=0.85),
+                          xlab=gpar(cex=1),
+                          title=gpar(cex=1.5)),
+           hrzl_lines=list("1" = gpar(lwd=2, col="black"), # 在第一行上面画黑色实线
+                           "2" = gpar(lwd=1.5, col="black"), # 在第一行标题行下画黑色实线
+                           "15" = gpar(lwd=2, col="black")), # 在最后一行上画黑色实线
+           lineheight = unit(.75,"cm"),# 固定行高
+           colgap = unit(0.3,"cm"),
+           mar=unit(rep(1.5, times = 4), "cm"),
+           new_page = F
+)
+dev.off()
+
+####药物敏感性分析####
+setwd("TCGA-STAD")
+setwd("IC50")
+#install.packages("oncoPredict") 
+library(oncoPredict)
+library(tidyverse)
+#BiocManager::install("")
+
+#函数定义
+get_oncoPredict_res <- function(data = data,
+                                traData = c('GDSC2', 'GDSC1', 'CTRP2')[1],
+                                minNumSamples = 10) {
+  library(oncoPredict)
+  
+  data <- as.matrix(data)
+  if (traData == 'GDSC2') {
+    traDataExp <- readRDS("DataFiles/Training Data/GDSC2_Expr (RMA Normalized and Log Transformed).rds")
+    traDataRes <- readRDS(file = "DataFiles/Training Data/GDSC2_Res.rds")
+  } else if (traData == 'GDSC1') {
+    traDataExp <- readRDS("DataFiles/Training Data/GDSC1_Expr (RMA Normalized and Log Transformed).rds")
+    traDataRes <- readRDS(file = "DataFiles/Training Data/GDSC1_Res.rds")
+  } else if (traData == 'CTRP2') {
+    traDataExp <- readRDS("DataFiles/Training Data/CTRP2_Expr (TPM, not log transformed).rds")
+    traDataExp <- log2(traDataExp + 1)
+    traDataRes <- readRDS(file = "DataFiles/Training Data/CTRP2_Res.rds")
+  } else {
+    stop('请检查 traData 是否正确, 仅支持GDSC2, GDSC1, CTRP2 三种')
+  }
+  
+  calcPhenotype(trainingExprData = traDataExp,
+                trainingPtype = traDataRes,
+                testExprData = data,
+                batchCorrect = 'eb',  #   "eb" for ComBat  
+                powerTransformPhenotype = TRUE,
+                removeLowVaryingGenes = 0.2,
+                minNumSamples = minNumSamples, 
+                printOutput = TRUE, 
+                removeLowVaringGenesFrom = 'rawData')
+}
+# 读取表达谱数据
+dat_exp <- read.table("tpms01A_log2.txt",sep = "\t",row.names = 1,check.names = F,stringsAsFactors = F,header = T)
+#药物敏感性预测
+#GDSC2
+get_oncoPredict_res(data = dat_exp,traData = 'GDSC2')
+#GDSC1
+#get_oncoPredict_res(data = dat_exp,traData = 'GDSC1')
+# CTRP2
+# get_oncoPredict_res(data = dat_exp,traData = 'CTRP2')
+
+#绘图
+#手动导入Drugpredictions
+exp <- read.table("tpms01A_log2.txt",sep = "\t",row.names = 1,check.names = F,stringsAsFactors = F,header = T)
+med=median(as.numeric(exp["CDKN3",]))
+exp <- exp %>% t() %>% as.data.frame()
+exp <- exp %>% mutate(group=factor(ifelse(exp$CDKN3>med,"high","low"),levels = c("low","high")))
+class(exp$group)
+
+identical(rownames(drug),rownames(exp))
+drug$group <- exp$group
+library(ggpubr)
+library(ggsci)
+ggboxplot(drug,
+          x = "group", y = "Camptothecin_1003",#可以任何一个基因
+          fill = "group") +
+  scale_fill_lancet()+
+  stat_compare_means(comparisons = list(c(1, 2)),
+                     method = "wilcox.test",   #设置统计方法
+                     symnum.args=list(cutpoints = c(0, 0.001, 0.01, 0.05, 1),
+                                      symbols = c("***", "**", "*", "ns")))
+dev.off()
+
+
+####作业4####
+
+#LUAD患者根据BTK中位数分组 做生存分析
+
+#将LUAD患者根据ImmuneScore中位数分成两组 做生存分析
+#将LUAD患者根据StromalScore中位数分成两组 做生存分析
+#将LUAD患者根据ESTIMATEScore中位数分成两组 做生存分析
+
+#随着Stage进展 LUAD患者BTK表达的变化趋势 柱状图
+#随着T进展 LUAD患者BTK表达的变化趋势 柱状图
+#随着N进展 LUAD患者BTK表达的变化趋势 柱状图
+#随着M进展 LUAD患者BTK表达的变化趋势 柱状图
+
+
+#随着Stage进展 LUAD患者ImmuneScore的变化趋势 柱状图
+#随着Stage进展 LUAD患者StromalScore的变化趋势 柱状图
+#随着Stage进展 LUAD患者ESTIMATEScore的变化趋势 柱状图
+
+#随着T进展 LUAD患者ImmuneScore的变化趋势 柱状图
+#随着T进展 LUAD患者StromalScore的变化趋势 柱状图
+#随着T进展 LUAD患者ESTIMATEScore的变化趋势 柱状图
+
+#随着N进展 LUAD患者ImmuneScore的变化趋势 柱状图
+#随着N进展 LUAD患者StromalScore的变化趋势 柱状图
+#随着N进展 LUAD患者ESTIMATEScore的变化趋势 柱状图
+
+#随着M进展 LUAD患者ImmuneScore的变化趋势 柱状图
+#随着M进展 LUAD患者StromalScore的变化趋势 柱状图
+#随着M进展 LUAD患者ESTIMATEScore的变化趋势 柱状图
+
+
+####Class6####
+##### ConsensusClusterPlus聚类 #####
+setwd("TCGA-STAD")
+setwd("cluster")
+#library(BiocManager)
+#BiocManager::install('ConsensusClusterPlus')
+library(tidyverse)
+library(ConsensusClusterPlus)
+exp <- read.table("tpms01A_log2.txt",sep = "\t",row.names = 1,check.names = F,stringsAsFactors = F,header = T)
+
+#不学也行我们只需要得到group
+d=as.matrix(exp)
+gene <- c("ALKBH5","YTHDF1") #修改基因名称即可
+d <- d[gene,]
+##了解即可##
+mads=apply(d,1,mad)
+d=d[rev(order(mads))[1:2],] 
+d = sweep(d,1, apply(d,1,median,na.rm=T))
+
+title=("JULEI") ##文件夹输出图片的位置
+set.seed(1) 
+results = ConsensusClusterPlus(d,maxK=9,reps=50,pItem=0.8,pFeature=1,
+                               title=title,clusterAlg="hc",distance="pearson",seed=1,plot="pdf")
+
+icl = calcICL(results,title=title,plot="pdf") ##画另一组图片
+##了解即可##
+##获取分组信息
+group<-results[[2]][["consensusClass"]] #精华在此
+class(group)
+head(group)
+group<-as.data.frame(group)
+group$group <- factor(group$group,levels=c(1,2))
+#group$group <- as.factor(group$group)
+class(group$group)
+save(group,file = "group_AY.Rda")
+##获取完毕
+
+# 绘制热图
+library(pheatmap)
+exp_gene <- exp[gene,]
+annotation <- group %>% arrange(group)
+exp_gene <- exp_gene[,rownames(annotation)]
+
+pheatmap(exp_gene,
+         annotation = annotation,
+         annotation_colors = list(group = c("1" ="#01468b","2"= "#ee0000")),
+         cluster_cols = F,
+         fontsize=5,
+         fontsize_row=8,
+         scale="row",
+         show_colnames=F,
+         cluster_row = F,
+         fontsize_col=3)
+dev.off()
+
+####根据cluster分组画CIBERSORT分组比较图####
+setwd("TCGA-STAD")
+setwd("cluster_cibersort")
+a <- read.table("ciber.res.txt", sep = "\t",row.names = 1,check.names = F,header = T)
+#双击打开group_AY.Rda
+identical(rownames(a),rownames(group))
+a$group <- group$group
+a <- a %>% rownames_to_column("sample")
+library(ggsci)
+library(tidyr)
+library(ggpubr)
+b <- gather(a,key=CIBERSORT,value = Fraction,-c(group,sample))
+ggboxplot(b, x = "CIBERSORT", y = "Fraction",
+          fill = "group", palette = "jco")+
+  stat_compare_means(aes(group = group),
+                     method = "wilcox.test",
+                     label = "p.signif",
+                     symnum.args=list(cutpoints = c(0, 0.001, 0.01, 0.05, 1),
+                                      symbols = c("***", "**", "*", "ns")))+
+  theme(text = element_text(size=10),
+        axis.text.x = element_text(angle=45, hjust=1)) 
+
+dev.off()
+####根据cluster分组画ssGSEA分组比较图####
+setwd("TCGA-STAD")
+setwd("cluster_ssGSEA")
+a <- read.table("ssGSEA_res.txt", sep = "\t",row.names = 1,check.names = F,header = T)
+#双击打开group_AY.Rda
+identical(rownames(a),rownames(group))
+a$group <- group$group
+a <- a %>% rownames_to_column("sample")
+library(ggsci)
+library(tidyr)
+library(ggpubr)
+b <- gather(a,key=ssGSEA,value = Expression,-c(group,sample))
+ggboxplot(b, x = "ssGSEA", y = "Expression",
+          fill = "group", palette = "jco")+
+  stat_compare_means(aes(group = group),
+                     method = "wilcox.test",
+                     label = "p.signif",
+                     symnum.args=list(cutpoints = c(0, 0.001, 0.01, 0.05, 1),
+                                      symbols = c("***", "**", "*", "ns")))+
+  theme(text = element_text(size=10),
+        axis.text.x = element_text(angle=45, hjust=1)) 
+
+dev.off()
+####根据cluster分组画Xcell分组比较图####
+setwd("TCGA-STAD")
+setwd("cluster_Xcell")
+a <- read.table("Xcell_res.txt", sep = "\t",row.names = 1,check.names = F,header = T)
+#双击打开group_AY.Rda
+identical(rownames(a),rownames(group))
+a$group <- group$group
+a <- a %>% rownames_to_column("sample")
+library(ggsci)
+library(tidyr)
+library(ggpubr)
+b <- gather(a,key=Xcell,value = Expression,-c(group,sample))
+ggboxplot(b, x = "Xcell", y = "Expression",
+          fill = "group", palette = "jco")+
+  stat_compare_means(aes(group = group),
+                     method = "wilcox.test",
+                     label = "p.signif",
+                     symnum.args=list(cutpoints = c(0, 0.001, 0.01, 0.05, 1),
+                                      symbols = c("***", "**", "*", "ns")))+
+  theme(text = element_text(size=10),
+        axis.text.x = element_text(angle=45, hjust=1)) 
+
+dev.off()
+####根据cluster分组画ICB分组比较图####
+#R作图
+setwd("TCGA-STAD")
+setwd("cluster_ICB")
+library(tidyverse)
+exp <- read.table("tpms01A_log2.txt", sep = "\t",row.names = 1,check.names = F,header = T)
+exp <- exp %>% t() %>% as.data.frame()
+identical(rownames(exp),rownames(group))
+exp <- exp %>% mutate(group=group$group)
+class(exp$group)
+gene <- c("PDCD1","CD274","PDCD1LG2","group")
+a <- exp[,gene]
+a <- a %>% rownames_to_column("sample")
+library(ggsci)
+library(tidyr)
+library(ggpubr)
+b <- gather(a,key=ICB,value = Expression,-c(group,sample))
+
+ggboxplot(b, x = "ICB", y = "Expression",
+          fill = "group", palette = "jco")+
+  stat_compare_means(aes(group = group),
+                     method = "wilcox.test",
+                     label = "p.signif",
+                     symnum.args=list(cutpoints = c(0, 0.001, 0.01, 0.05, 1),
+                                      symbols = c("***", "**", "*", "ns")))+
+  theme(text = element_text(size=10),
+        axis.text.x = element_text(angle=45, hjust=1)) 
+
+dev.off()
+####cluster1/2差异分析####
+setwd("..")
+setwd("TCGA-STAD")
+setwd("cluster_DEG")
+library(DESeq2)
+library(tidyverse)
+counts_01A <- read.table("counts01A.txt",sep = "\t",row.names = 1,check.names = F,stringsAsFactors = F,header = T)
+conditions <- group
+
+
+dds <- DESeqDataSetFromMatrix(
+  countData = counts_01A,
+  colData = conditions,
+  design = ~ group)
+
+dds <- DESeq(dds)
+
+resultsNames(dds)
+res <- results(dds)
+save(res,file="DEG_cluster.Rda")
+
+####cluster1/2差异分析 热图####
+setwd("TCGA-STAD")
+setwd("cluster_DEG")
+library(tidyverse)
+exp <- read.table("tpms01A_log2.txt",sep = "\t",row.names = 1,check.names = F,stringsAsFactors = F,header = T)
+#读取差异分析rda文件
+#DEG <- as.data.frame(res)%>% arrange(padj)
+DEG <- as.data.frame(res)
+DEG <- arrange(DEG,padj)
+DEG <- na.omit(DEG)
+
+
+logFC_cutoff <- 1
+type1 = (DEG$padj < 0.05)&(DEG$log2FoldChange < -logFC_cutoff)
+type2 = (DEG$padj < 0.05)&(DEG$log2FoldChange > logFC_cutoff)
+DEG$change = ifelse(type1,"DOWN",ifelse(type2,"UP","NOT"))
+table(DEG$change)
+#下载pheatmap包 两种方法
+library(pheatmap)
+a <- filter(DEG,change == 'UP')
+b <- filter(DEG,change == 'DOWN')
+c <- rbind(a,b)
+d <- rownames(c)
+#提取差异基因表达谱
+exp_diff <- exp[d,]
+##数据处理完毕 以上是精华需要掌握 以下直接跑即可
+
+#设置分组信息方法二
+annotation_col <- group
+
+
+annotation_col <- arrange(annotation_col,group)
+exp_diff <- exp_diff[,rownames(annotation_col)]
+
+#开始画图
+pheatmap(exp_diff,
+         annotation_col=annotation_col,
+         scale = "row",
+         show_rownames = F,
+         show_colnames =F,
+         color = colorRampPalette(c("navy", "white", "red"))(50),
+         cluster_cols =F,
+         cluster_rows = F,
+         fontsize = 10,
+         fontsize_row=5,
+         fontsize_col=3)
+#保存图片 调整大小
+dev.off()#关闭画板
+
+####cluster1/2差异分析 火山图####
+library(ggpubr)
+library(ggthemes)
+DEG$logP <- -log10(DEG$padj)#为什么要-log呢 数学原理
+#初步图片
+ggscatter(DEG,
+          x = "log2FoldChange", y = "logP") +
+  theme_base()
+
+#增加基因上下调信息
+ggscatter(DEG, x = "log2FoldChange", y = "logP",
+          color = "change",
+          palette = c("blue", "black", "red"),
+          size = 1) +
+  theme_base()
+
+#添加分界线
+ggscatter(DEG, x = "log2FoldChange", y = "logP", xlab = "log2FoldChange",
+          ylab = "-log10(Adjust P-value)",
+          color = "change",
+          palette = c("blue", "black", "red"),
+          size = 1) +
+  theme_base() +
+  geom_hline(yintercept = -log10(0.05), linetype = "dashed") +
+  geom_vline(xintercept = c(-1, 1), linetype = "dashed")
+dev.off()
+
+##如何添加特定基因标签
+DEG$Gene <- rownames(DEG)
+DEG$Label = "" 
+gene <- c("ALKBH5","YTHDF1")
+#如何添加多个基因
+
+DEG$Label[match(gene, DEG$Gene)] <- gene
+#画图
+ggscatter(DEG, x = "log2FoldChange", y = "logP",
+          color = "change",
+          palette = c("blue", "black", "red"),
+          size = 1,
+          label = DEG$Label,
+          font.label = 8,
+          repel = T,
+          xlab = "log2FoldChange",
+          ylab = "-log10(Adjust P-value)") +
+  theme_base() +
+  geom_hline(yintercept = -log10(0.05), linetype = "dashed") +
+  geom_vline(xintercept = c(-1, 1), linetype = "dashed")
+dev.off()
+
+####cluster1/2差异分析 fuji####
+####GO####
+setwd("TCGA-STAD")
+setwd("FUJI_cluster_DEG")
+library(tidyverse)
+library("BiocManager")
+#安装加载包
+chooseBioCmirror()
+#BiocManager::install('clusterProfiler')
+#BiocManager::install('org.Hs.eg.db')
+library(org.Hs.eg.db)
+#org.Hs.eg.db包主要注释人类基因:用于不同数据库ID间的转化
+library(clusterProfiler)
+#导入差异基因文件
+DEG <- as.data.frame(res)%>% 
+  arrange(padj) %>% 
+  dplyr::filter(abs(log2FoldChange) > 1, padj < 0.05)
+
+DEG <- DEG %>% rownames_to_column("SYMBOL")
+
+genelist <- bitr(DEG$SYMBOL, fromType="SYMBOL",
+                 toType="ENTREZID", OrgDb='org.Hs.eg.db')
+DEG <- inner_join(DEG,genelist,by="SYMBOL")
+
+#GO分析
+ego <- enrichGO(gene = DEG$ENTREZID,
+                OrgDb = org.Hs.eg.db, 
+                ont = "all",
+                pAdjustMethod = "BH",
+                minGSSize = 1,
+                pvalueCutoff =0.05, 
+                qvalueCutoff =0.05,
+                readable = TRUE)
+
+ego_res <- ego@result
+save(ego,ego_res,file = "GO_cluster_DEG.Rda")
+
+#3. 可视化
+##3.1 柱状图
+barplot(ego, showCategory = 10,color = "pvalue")
+##3.2 气泡图
+dotplot(ego, showCategory = 10)
+##3.3 分类展示
+barplot(ego, drop = TRUE, showCategory =10,split="ONTOLOGY") + 
+  facet_grid(ONTOLOGY~., scale='free')
+dotplot(ego,showCategory = 10,split="ONTOLOGY") + 
+  facet_grid(ONTOLOGY~., scale='free')
+dev.off()
+##3.4 网络图
+#install.packages("ggnewscale")
+library(ggnewscale)
+List = DEG$log2FoldChange
+names(List)= DEG$ENTREZID
+head(List)
+List = sort(List,decreasing = T)
+
+cnetplot(ego, categorySize="pvalue", foldChange = List,colorEdge = TRUE)
+##3.5 网络图2
+cnetplot(ego, foldChange = List, circular = TRUE, colorEdge = TRUE)
+##3.6 热图
+heatplot(ego,foldChange = List)
+
+
+####TMB####
+setwd("TCGA-STAD")
+setwd("TMB")
+#BiocManager::install("maftools")
+library(maftools)
+library(tidyverse)
+library(readxl)
+library(readr)
+
+# https://portal.gdc.cancer.gov/
+
+#定义合并函数
+merge_maf <- function(metadata, path){
+  #通过合并path,还有sample sheet前两列得到每一个文件的完整路径
+  filenames <- file.path(path, metadata$file_id, metadata$file_name, 
+                         fsep = .Platform$file.sep)
+  
+  message ('############### Merging maf data ################\n',
+           '### This step may take a few minutes ###\n')
+  #通过lapply循环去读每一个样本的maf，然后通过rbind合并成矩阵，按行来合并
+  #colClasses指定所有列为字符串
+  mafMatrix <- do.call("rbind", lapply(filenames, function(fl) 
+    read.table(gzfile(fl),header=T,sep="\t",quote="",fill=T,colClasses="character")))
+  return (mafMatrix)
+}
+
+#定义去除重复样本的函数FilterDuplicate
+FilterDuplicate <- function(metadata) {
+  filter <- which(duplicated(metadata[,'sample']))
+  if (length(filter) != 0) {
+    metadata <- metadata[-filter,]
+  }
+  message (paste('Removed', length(filter), 'samples', sep=' '))
+  return (metadata)
+}
+
+#读入maf的sample sheet文件
+metaMatrix.maf=read.table("maf_sample_sheet.tsv",sep="\t",header=T)
+#替换.为下划线，转换成小写，sample_id替换成sample
+names(metaMatrix.maf)=gsub("sample_id","sample",gsub("\\.","_",tolower(names(metaMatrix.maf))))
+#删掉最后一列sample_type中的空格
+metaMatrix.maf$sample_type=gsub(" ","",metaMatrix.maf$sample_type)
+#删掉重复的样本
+metaMatrix.maf <- FilterDuplicate(metaMatrix.maf)
+
+#调用merge_maf函数合并maf的矩阵
+maf_value=merge_maf(metadata=metaMatrix.maf, 
+                    path="maf_data"
+)
+#查看前三行前十列
+maf_value[1:3,1:10]
+
+#保存合并后的maf文件
+write.table(maf_value,file="combined_maf_value.txt",row.names=F,quote=F,sep="\t")
+
+#突变数据整理成数据框
+str(maf_value)
+a <- maf_value %>% 
+  .[,c("Hugo_Symbol","Variant_Classification","Tumor_Sample_Barcode")] %>% 
+  as.data.frame() %>% 
+  mutate(Tumor_Sample_Barcode = substring(.$Tumor_Sample_Barcode,1,12))
+table(a$Variant_Classification)
+a <- filter(a,Variant_Classification %in% c("Missense_Mutation","Nonsense_Mutation","Frame_Shift_Del","Frame_Shift_Ins","Splice_Site","Nonstop_Mutation","In_Frame_Del","Translation_Start_Site","In_Frame_Ins" ))
+table(a$Variant_Classification)
+gene <- as.character(unique(a$Hugo_Symbol))
+sample <- as.character(unique(a$Tumor_Sample_Barcode))
+
+#以下不需要掌握
+mat <- as.data.frame(matrix("",length(gene),length(sample),
+                            dimnames = list(gene,sample)))
+mat_0_1 <- as.data.frame(matrix(0,length(gene),length(sample),
+                                dimnames = list(gene,sample)))
+
+for (i in 1:nrow(a)){
+  mat[as.character(a[i,1]),as.character(a[i,3])] <- as.character(a[i,2])
+}
+for (i in 1:nrow(a)){
+  mat_0_1[as.character(a[i,1]),as.character(a[i,3])] <- 1
+}
+
+gene_count <- data.frame(gene=rownames(mat_0_1),
+                         count=as.numeric(apply(mat_0_1,1,sum))) %>%
+  arrange(desc(count))
+#需要知道a gene_count mat mat_0_1分别是什么
+save(mat,mat_0_1,gene_count,a,file = "TMB-STAD.rda")
+
+####TMB整体结果图#### 
+mut2 <- read.maf(maf = "combined_maf_value.txt")
+plotmafSummary(maf = mut2,
+               rmOutlier = TRUE,   #删除数据中的离群值
+               addStat = 'median',
+               dashboard = TRUE,
+               titvRaw = FALSE)
+
+#Oncostrip图
+oncostrip(maf = mut2,
+          genes = c('TP53','TTN', 'MTOR'))   #输入研究的基因名称
+
+####TMB分组比较图####
+#计算TMB
+mut2 <- read.maf(maf = "combined_maf_value.txt")
+maf = tmb(maf = mut2,
+          captureSize = 50,
+          logScale = TRUE)   
+maf$sample <- substr(maf$Tumor_Sample_Barcode,1,16)
+
+write.csv(maf,file = "maf.csv")
+maf <- read.csv("maf.csv", row.names=1)
+#导入group 需要根据自己的需求改(例如根据某基因分高低组)
+load("group_AY.rda")
+com <- intersect(rownames(maf),rownames(group))
+maf <- maf[com,]
+group <- group %>% t() %>% as.data.frame()
+group <- group[,com]
+group <- group %>% t() %>% as.data.frame()
+identical(rownames(group),rownames(maf))
+tmb <- cbind(maf,group)
+write.csv(tmb, file = "tmb.csv")
+#仙桃画图
+#R作图
+library(ggpubr)
+library(ggsci)
+ggboxplot(tmb,
+          x = "group", y = "total_perMB",
+          fill = "group") +
+  scale_fill_lancet()+
+  stat_compare_means(comparisons = list(c(1, 2)),
+                     method = "wilcox.test",   #设置统计方法
+                     symnum.args=list(cutpoints = c(0, 0.001, 0.01, 0.05, 1),
+                                      symbols = c("***", "**", "*", "ns")))
+dev.off()
+
+####TMB瀑布图及分组绘图####
+setwd("TCGA-STAD")
+setwd("TMB")
+library(tidyverse)
+load("TMB-STAD.rda")
+#导入group 需要根据自己的需求改(例如根据某基因分高低组)
+load("group_AY.rda")
+
+#BiocManager::install("ComplexHeatmap")
+#install.packages("circlize")
+library(ComplexHeatmap)
+library(circlize)
+library(tidyverse)
+
+mat = as.matrix(mat)
+mat[1:5, 1:5]
+dim(mat)
+
+# 设置颜色
+mutant_type <- as.character(unique(a$Variant_Classification))
+# [1] "Missense_Mutation"      "Nonsense_Mutation"      "Frame_Shift_Del"       
+# [4] "Frame_Shift_Ins"        "Splice_Site"            "Nonstop_Mutation"      
+# [7] "In_Frame_Del"           "Translation_Start_Site" "In_Frame_Ins" 
+
+library(RColorBrewer)
+display.brewer.all()
+
+col = c("Missense_Mutation"=brewer.pal(9, "Set1")[3],
+        "Nonsense_Mutation"=brewer.pal(9, "Set1")[1],
+        "Frame_Shift_Del"=brewer.pal(9, "Set1")[2],
+        "Frame_Shift_Ins"=brewer.pal(9, "Set1")[4],
+        "Splice_Site"=brewer.pal(9, "Set1")[5],
+        "Nonstop_Mutation"=brewer.pal(9, "Set1")[6],
+        "In_Frame_Del"=brewer.pal(9, "Set1")[7],
+        "Translation_Start_Site"=brewer.pal(9, "Set1")[8],
+        "In_Frame_Ins"=brewer.pal(9, "Set1")[9])
+
+alter_fun = list(
+  # 设置背景颜色
+  background = function(x, y, w, h) {
+    grid.rect(x, y, w-unit(2, "pt"), h-unit(2, "pt"), 
+              gp = gpar(fill = "#CCCCCC", col = NA))
+  },
+  # 设置HOMDEL类型的颜色
+  Missense_Mutation = function(x, y, w, h) {
+    grid.rect(x, y, w-unit(2, "pt"), h-unit(2, "pt"), 
+              gp = gpar(fill = col["Missense_Mutation"], col = NA))
+  },
+  # 设置AMP类型的颜色
+  Nonsense_Mutation = function(x, y, w, h) {
+    grid.rect(x, y, w-unit(2, "pt"), h-unit(2, "pt"), 
+              gp = gpar(fill = col["Nonsense_Mutation"], col = NA))
+  },
+  # 设置MUT类型的颜色
+  Frame_Shift_Del = function(x, y, w, h) {
+    grid.rect(x, y, w-unit(2, "pt"), h*0.33, 
+              gp = gpar(fill = col["Frame_Shift_Del"], col = NA))
+  },   
+  # 设置HOMDEL类型的颜色
+  Frame_Shift_Ins = function(x, y, w, h) {
+    grid.rect(x, y, w-unit(2, "pt"), h-unit(2, "pt"), 
+              gp = gpar(fill = col["Frame_Shift_Ins"], col = NA))
+  },
+  # 设置AMP类型的颜色
+  Splice_Site = function(x, y, w, h) {
+    grid.rect(x, y, w-unit(2, "pt"), h-unit(2, "pt"), 
+              gp = gpar(fill = col["Splice_Site"], col = NA))
+  },
+  # 设置MUT类型的颜色
+  Nonstop_Mutation = function(x, y, w, h) {
+    grid.rect(x, y, w-unit(2, "pt"), h*0.33, 
+              gp = gpar(fill = col["Nonstop_Mutation"], col = NA))
+  },
+  # 设置HOMDEL类型的颜色
+  In_Frame_Del = function(x, y, w, h) {
+    grid.rect(x, y, w-unit(2, "pt"), h-unit(2, "pt"), 
+              gp = gpar(fill = col["In_Frame_Del"], col = NA))
+  },
+  # 设置AMP类型的颜色
+  Translation_Start_Site = function(x, y, w, h) {
+    grid.rect(x, y, w-unit(2, "pt"), h-unit(2, "pt"), 
+              gp = gpar(fill = col["Translation_Start_Site"], col = NA))
+  },
+  # 设置MUT类型的颜色
+  In_Frame_Ins = function(x, y, w, h) {
+    grid.rect(x, y, w-unit(2, "pt"), h*0.33, 
+              gp = gpar(fill = col["In_Frame_Ins"], col = NA))
+  }
+)
+
+# 用oncoPrint函数绘图
+group <- group %>% 
+  rownames_to_column("sample") %>% 
+  mutate(sample=substring(.$sample,1,12))
+com_sample <- intersect(colnames(mat),group$sample)
+
+gene_count <- data.frame(gene=rownames(mat_0_1),
+                         count=as.numeric(apply(mat_0_1,1,sum))) %>%
+  arrange(desc(count))
+gene_top <- gene_count$gene[1:30] # 修改数字，代表TOP多少
+
+# 总体的瀑布图
+oncoPrint(mat[gene_top,],#修改绘图的行和列
+          alter_fun = alter_fun, col = col, 
+          top_annotation = HeatmapAnnotation(
+            column_barplot = anno_oncoprint_barplot(ylim=c(0,20),border=T)),
+          right_annotation = rowAnnotation(
+            row_barplot = anno_oncoprint_barplot(border = TRUE,ylim=c(0,300))),
+          remove_empty_columns = TRUE, remove_empty_rows = TRUE,
+          row_names_gp = gpar(fontsize = 7),
+          pct_gp = gpar(fontsize = 7), 
+          pct_side = "right", row_names_side = "left",
+          column_title = "OncoPrint for TCGA STAD Top30 Mutation Gene", 
+          heatmap_legend_param = list(title = "Alternations"))
+
+# 瀑布图：group1的TOP30突变基因
+group1 <- group %>% filter(.$group==1)
+group1_sample <- intersect(com_sample,group1$sample)
+mat_0_1_group1 <- mat_0_1[,group1_sample]
+gene1_count <- data.frame(gene=rownames(mat_0_1_group1),
+                          count=as.numeric(apply(mat_0_1_group1,1,sum))) %>%
+  arrange(desc(count))
+gene1_top <- gene1_count$gene[1:30] # 修改数字，代表TOP多少
+
+oncoPrint(mat[gene1_top,group1_sample],
+          alter_fun = alter_fun, col = col, 
+          top_annotation = HeatmapAnnotation(
+            column_barplot = anno_oncoprint_barplot(ylim=c(0,20),border=TRUE)),
+          right_annotation = rowAnnotation(
+            row_barplot = anno_oncoprint_barplot(border = TRUE,ylim=c(0,150))),
+          remove_empty_columns = TRUE, remove_empty_rows = TRUE,
+          row_names_gp = gpar(fontsize = 7),
+          pct_gp = gpar(fontsize = 7), 
+          pct_side = "right", row_names_side = "left",
+          column_title = "Top30 Mutation Gene of Group1 (n=210)", 
+          heatmap_legend_param = list(title = "Alternations"))
+
+# 瀑布图：group2的TOP30突变基因
+group2 <- group %>% filter(.$group==2)
+group2_sample <- intersect(com_sample,group2$sample)
+mat_0_1_group2 <- mat_0_1[,group2_sample]
+gene2_count <- data.frame(gene=rownames(mat_0_1_group2),
+                          count=as.numeric(apply(mat_0_1_group2,1,sum))) %>%
+  arrange(desc(count))
+gene2_top <- gene2_count$gene[1:30] # 修改数字，代表TOP多少
+
+oncoPrint(mat[gene2_top,group2_sample],
+          alter_fun = alter_fun, col = col, 
+          top_annotation = HeatmapAnnotation(
+            column_barplot = anno_oncoprint_barplot(ylim=c(0,20),border=TRUE)),
+          right_annotation = rowAnnotation(
+            row_barplot = anno_oncoprint_barplot(border = TRUE,ylim=c(0,150))),
+          remove_empty_columns = TRUE, remove_empty_rows = TRUE,
+          row_names_gp = gpar(fontsize = 7),
+          pct_gp = gpar(fontsize = 7), 
+          pct_side = "right", row_names_side = "left",
+          column_title = "Top30 Mutation Gene of Group2 (n=189)", 
+          heatmap_legend_param = list(title = "Alternations"))
+
+####特定基因突变数分组比较图####
+setwd("TCGA-STAD")
+setwd("TMB")
+library(tidyverse)
+load("TMB-STAD.rda")
+#导入group 需要根据自己的需求改(例如根据某基因分高低组)
+load("group_AY.rda")
+
+rownames(group) <- substring(rownames(group),1,12)
+a <- intersect(rownames(group),colnames(mat_0_1))
+
+group <- as.data.frame(t(group))
+group <- group[,a]
+group <- as.data.frame(t(group))
+
+mat_0_1 <- mat_0_1[,a]
+mat_0_1 <- as.data.frame(t(mat_0_1))
+identical(rownames(group),rownames(mat_0_1))
+mat_0_1_group <- cbind(mat_0_1,group)
+
+mat_0_1_group1 <- filter(mat_0_1_group,group=="1")
+mat_0_1_group2 <- filter(mat_0_1_group,group=="2")
+
+gene <- c("MSH2","MSH6")
+gene_1 <- mat_0_1_group1[,gene]
+gene_2 <- mat_0_1_group2[,gene]
+write.csv(gene_1,file = "gene_1.csv")
+write.csv(gene_2,file = "gene_2.csv")
+
+#mat_0_1_grouphigh <- filter(mat_0_1_group,group=="high")
+#mat_0_1_grouplow <- filter(mat_0_1_group,group=="low")
+
+#gene <- c("MSH2","MSH6")
+#gene_high <- mat_0_1_grouphigh[,gene]
+#gene_low <- mat_0_1_grouplow[,gene]
+#write.csv(gene_high,file = "gene_high.csv")
+#write.csv(gene_low,file = "gene_low.csv")
+
+
+####Tableone####
+setwd("TCGA-STAD")
+setwd("Tableone")
+#install.packages("tableone")
+library(tableone)
+#读取临床信息
+rt <- read.table("clinical01A.txt",header=T,sep="\t",row.names=1)
+#双击打开group
+identical(rownames(group),rownames(rt))
+rt <- cbind(rt,group)
+head(rt)
+table(rt$gender)
+table(rt$age_at_index)
+table(rt$ajcc_pathologic_stage)
+table(rt$ajcc_pathologic_t)
+table(rt$ajcc_pathologic_n)
+table(rt$ajcc_pathologic_m)
+#查看数据的类型
+str(rt) 
+#创建Tableone
+tab1 <- CreateTableOne(data = rt) 
+#查看tab1
+print(tab1)   
+#设定变量信息
+#设置需要比较的变量名称
+myVars <- c("gender", "age_at_index", "ajcc_pathologic_t", "ajcc_pathologic_n", "ajcc_pathologic_m", "ajcc_pathologic_stage")
+#设置分类变量
+catVars <- c("gender", "ajcc_pathologic_t", "ajcc_pathologic_n", "ajcc_pathologic_m", "ajcc_pathologic_stage")
+#统计分析
+tab2 <- CreateTableOne(data = rt,   #指定分析数据集
+                       vars = myVars,   #指定比较的变量
+                       factorVars = catVars)   #指定其中的分类变量
+#查看tab2
+print(tab2)   
+#分组统计
+tab3 <- CreateTableOne(data = rt,
+                       strata = "group",   #指定分组变量
+                       vars = myVars,
+                       factorVars = catVars)
+#查看tab3
+print(tab3,
+      cramVars = catVars)  #指定进行fisher精确检验
+#添加overall
+tab4 <- CreateTableOne(data = rt,
+                       strata = "group",   #指定分组变量
+                       vars = myVars,
+                       factorVars = catVars,
+                       addOverall = TRUE)   #添加Overall列的分析结果
+#查看tab4
+print(tab4,
+      cramVars = catVars)   
+
+#输出结果
+tab5 <- print(tab4,
+              cramVars = catVars,
+              quote = FALSE,   #不显示引号
+              noSpaces = TRUE,
+              printToggle = FALSE)
+write.csv(tab5, file = "TABLE1.csv")
+
+#根据某个基因表达中位数将肿瘤样本分成两组做基线资料表
+
+####作业5####
+#作业5较难 尽力去做 下节课会演示
+#根据ImmuneScore 中位数 将LUAD 肿瘤样本分成两组做差异分析 画热图 
+#根据StromalScore 中位数 将LUAD 肿瘤样本分成两组做差异分析 画热图 
+#两个上调基因结果取交集 两个下调基因结果取交集 然后上调基因交集和下调基因交集合并为差异基因 做GO KEGG富集分析 画圈型网络图
+
+####Class7####
+####WGCNA####
+#BiocManager::install("preprocessCore")
+#BiocManager::install("impute")
+#install.packages("WGCNA")
+library("tidyverse")
+library("WGCNA")  
+setwd("TCGA-STAD")
+setwd("WGCNA")
+
+####整理输入表达谱####
+#导入差异基因文件
+#选取用于分析的基因
+DEG <- as.data.frame(res)%>% 
+  arrange(padj) %>% 
+  dplyr::filter(abs(log2FoldChange) > 2, padj < 0.05)#根据自己需要
+exp <- read.table("tpms_log2.txt", sep = "\t",row.names = 1,check.names = F,header = T)
+input <- exp
+
+#保证样本在行，基因在列 很重要！！！！
+datExpr0 = as.data.frame(t(input)) 
+#检查缺失值
+gsg = goodSamplesGenes(datExpr0, verbose = 3)
+gsg$allOK
+#如果没有达标就需要筛选
+if (!gsg$allOK){
+  # Optionally, print the gene and sample names that were removed:
+  if (sum(!gsg$goodGenes)>0) 
+    printFlush(paste("Removing genes:", paste(names(datExpr0)[!gsg$goodGenes], collapse = ", ")));
+  if (sum(!gsg$goodSamples)>0) 
+    printFlush(paste("Removing samples:", paste(rownames(datExpr0)[!gsg$goodSamples], collapse = ", ")));
+  # Remove the offending genes and samples from the data:
+  datExpr0 = datExpr0[gsg$goodSamples, gsg$goodGenes]
+}
+
+####样本聚类 去除离群样本####
+# 聚类
+sampleTree = hclust(dist(datExpr0), method = "average")
+# 画图
+par(cex = 0.6)
+par(mar = c(0,4,2,0))
+plot(sampleTree)
+plot(sampleTree, main = "Sample clustering to detect outliers", sub="", xlab="", cex.lab = 1.5, cex.axis = 1.5, cex.main = 2)
+###剪切线
+abline(h = 75, col = "red")
+###删除剪切线以上的样品
+clust = cutreeStatic(sampleTree, cutHeight = 75, minSize = 10)
+table(clust)
+keepSamples = (clust==1)
+datExpr0 = datExpr0[keepSamples, ] #注意这里datExpr0发生了变化
+dev.off()
+# 重新聚类
+sampleTree2 = hclust(dist(datExpr0), method = "average")
+plot(sampleTree2)
+dev.off()
+# 记录基因和样本数 保存表达谱
+nGenes = ncol(datExpr0)#基因数
+nSamples = nrow(datExpr0)#样本数
+save(datExpr0, nGenes, nSamples,file = "Step01-WGCNA_input.Rda")
+
+####选择最佳power值####
+enableWGCNAThreads()   #多线程工作
+powers = c(1:20)       #幂指数范围1:20
+sft = pickSoftThreshold(datExpr0, powerVector = powers, verbose = 5)
+
+par(mfrow = c(1,2))
+cex1 = 0.9
+###拟合指数与power值散点图
+plot(sft$fitIndices[,1], -sign(sft$fitIndices[,3])*sft$fitIndices[,2],
+     xlab="Soft Threshold (power)",ylab="Scale Free Topology Model Fit,signed R^2",type="n",
+     main = paste("Scale independence"));
+text(sft$fitIndices[,1], -sign(sft$fitIndices[,3])*sft$fitIndices[,2],
+     labels=powers,cex=cex1,col="red");
+abline(h=0.90,col="red") #可以修改
+###平均连通性与power值散点图
+plot(sft$fitIndices[,1], sft$fitIndices[,5],
+     xlab="Soft Threshold (power)",ylab="Mean Connectivity", type="n",
+     main = paste("Mean connectivity"))
+text(sft$fitIndices[,1], sft$fitIndices[,5], labels=powers, cex=cex1,col="red")
+#保存图片
+dev.off()
+#邻接矩阵转换
+sft #查看最佳power值
+softPower =sft$powerEstimate #最佳power值
+softPower = 2 #更改
+adjacency = adjacency(datExpr0, power = softPower)
+
+#TOM矩阵
+TOM = TOMsimilarity(adjacency)
+dissTOM = 1-TOM
+save(TOM,file = "TOM.Rda")
+
+####基因聚类####
+geneTree = hclust(as.dist(dissTOM), method = "average");
+plot(geneTree, xlab="", sub="", main = "Gene clustering on TOM-based dissimilarity",
+     labels = FALSE, hang = 0.04)
+
+# 动态剪切模块识别
+minModuleSize = 30      #模块基因数目
+dynamicMods = cutreeDynamic(dendro = geneTree, distM = dissTOM,
+                            deepSplit = 2, pamRespectsDendro = FALSE,
+                            minClusterSize = minModuleSize);
+table(dynamicMods)
+
+dynamicColors = labels2colors(dynamicMods)
+table(dynamicColors)
+
+plotDendroAndColors(geneTree, dynamicColors, "Dynamic Tree Cut",
+                    dendroLabels = FALSE, hang = 0.03,
+                    addGuide = TRUE, guideHang = 0.05,
+                    main = "Gene dendrogram and module colors")
+dev.off()
+
+#####相似模块合并####
+MEList = moduleEigengenes(datExpr0, colors = dynamicColors)
+MEs = MEList$eigengenes
+MEDiss = 1-cor(MEs);
+METree = hclust(as.dist(MEDiss), method = "average")
+plot(METree, main = "Clustering of module eigengenes",
+     xlab = "", sub = "")
+#保存图片
+##以下两句根据情况
+MEDissThres = 0.6#剪切高度可修改
+abline(h=MEDissThres, col = "red")
+#相似模块合并
+merge = mergeCloseModules(datExpr0, dynamicColors, cutHeight = MEDissThres, verbose = 3)
+mergedColors = merge$colors
+mergedMEs = merge$newMEs
+plotDendroAndColors(geneTree, mergedColors,"Dynamic Tree Cut",
+                    dendroLabels = FALSE, hang = 0.03,
+                    addGuide = TRUE, guideHang = 0.05,
+                    main = "Gene dendrogram and module colors")
+
+moduleColors = mergedColors
+table(moduleColors)
+colorOrder = c("grey", standardColors(50))
+moduleLabels = match(moduleColors, colorOrder)-1
+MEs = mergedMEs
+dev.off()
+
+####与性状做相关性分析####
+# 导入所需的免疫评分或其他文件 根据需要来
+ESTIMATE <- read.table("ESTIMATE_result.txt",sep = "\t",row.names = 1,check.names = F,stringsAsFactors = F,header = T)
+ESTIMATE <- ESTIMATE[rownames(datExpr0),]
+identical(rownames(ESTIMATE),rownames(datExpr0))
+# 查看ESTIMATE信息
+head(ESTIMATE)
+#样本必须在行
+# 对表达矩阵进行预处理
+datTraits = as.data.frame(do.call(cbind,lapply(ESTIMATE, as.numeric)))
+rownames(datTraits) = rownames(ESTIMATE)
+
+# 对样本进行聚类
+sampleTree2 = hclust(dist(datExpr0), method = "average")
+
+# 将ESTIMATE信息转换为颜色，白色表示低，红色表示高，灰色表示缺失
+traitColors = numbers2colors(datTraits, signed = FALSE)
+
+# 样本聚类图与样本性状热图
+plotDendroAndColors(sampleTree2, 
+                    traitColors,
+                    groupLabels = names(datTraits), 
+                    main = "Sample dendrogram and trait heatmap")
+#保存图片
+dev.off()
+
+##网络的分析
+# 对模块特征矩阵进行排序
+MEs=orderMEs(MEs)
+#计算模型特征矩阵和样本信息矩阵的相关度。
+moduleTraitCor=cor(MEs, datTraits, use="p")
+write.table(file="Step04-modPhysiological.cor.xls",moduleTraitCor,sep="\t",quote=F)
+moduleTraitPvalue=corPvalueStudent(moduleTraitCor, nSamples)
+write.table(file="Step04-modPhysiological.p.xls",moduleTraitPvalue,sep="\t",quote=F)
+
+#使用labeledHeatmap()将上述相关矩阵和p值可视化。
+textMatrix=paste(signif(moduleTraitCor,2),"\n(",signif(moduleTraitPvalue,1),")",sep="")
+dim(textMatrix)=dim(moduleTraitCor)
+# 基因模块与免疫评分信息相关性图
+labeledHeatmap(Matrix=moduleTraitCor,#模块和表型的相关性矩阵，这个参数最重要，其他可以不变
+               xLabels=colnames(datTraits),
+               yLabels=names(MEs),
+               ySymbols=names(MEs),
+               colorLabels=FALSE,
+               colors=blueWhiteRed(50),
+               textMatrix=textMatrix,
+               setStdMargins=FALSE,
+               cex.text=0.7,
+               cex.lab=0.7,
+               zlim=c(-1,1),
+               main=paste("Module-trait relationships"))
+#这是最终结果 保存图片
+dev.off()
+
+# 不同模块与基因性状的具体分析
+##矩阵一
+modNames = substring(names(MEs), 3)
+geneModuleMembership = as.data.frame(cor(datExpr0, MEs, use = "p"))
+####看一下目的基因和哪个模块相关性最高
+a <- geneModuleMembership
+a <- a %>% rownames_to_column()
+#a是相关性
+MMPvalue = as.data.frame(corPvalueStudent(as.matrix(geneModuleMembership), nSamples))
+names(geneModuleMembership) = paste("MM", modNames, sep="")
+names(MMPvalue) = paste("p.MM", modNames, sep="")
+#MMPvalue是p值
+##矩阵二
+traitNames=names(datTraits)
+geneTraitSignificance = as.data.frame(cor(datExpr0, datTraits, use = "p"))
+GSPvalue = as.data.frame(corPvalueStudent(as.matrix(geneTraitSignificance), nSamples))
+names(geneTraitSignificance) = paste("GS.", traitNames, sep="")
+names(GSPvalue) = paste("p.GS.", traitNames, sep="")
+#GSP value
+##批量输出性状和模块散点图
+for (trait in traitNames){
+  traitColumn=match(trait,traitNames)  
+  for (module in modNames){
+    column = match(module, modNames)
+    moduleGenes = moduleColors==module
+    if (nrow(geneModuleMembership[moduleGenes,]) > 1){
+      outPdf=paste(trait, "_", module,".pdf",sep="")
+      pdf(file=outPdf,width=7,height=7)
+      par(mfrow = c(1,1))
+      verboseScatterplot(abs(geneModuleMembership[moduleGenes, column]),
+                         abs(geneTraitSignificance[moduleGenes, traitColumn]),
+                         xlab = paste("Module Membership in", module, "module"),
+                         ylab = paste("Gene significance for ",trait),
+                         main = paste("Module membership vs. gene significance\n"),
+                         cex.main = 1.2, cex.lab = 1.2, cex.axis = 1.2, col = module)
+      abline(v=0.8,h=0.6,col="red")
+      dev.off()
+    }
+  }
+}
+
+#10. 输出每个模块的基因
+for (mod in 1:nrow(table(moduleColors)))
+{  
+  modules = names(table(moduleColors))[mod]
+  probes = colnames(datExpr0)
+  inModule = (moduleColors == modules)
+  modGenes = probes[inModule]
+  write.table(modGenes, file =paste0(modules,".txt"),sep="\t",row.names=F,col.names=F,quote=F)
+}
+
+#挑选模块中的基因
+#现场做给大家看
+#手动导入blue.txt
+geneModuleMembership <- geneModuleMembership[green$V1,]
+geneModuleMembership <- filter(geneModuleMembership,MMgreen > 0.8)
+geneTraitSignificance <- geneTraitSignificance[rownames(geneModuleMembership),]
+geneTraitSignificance <- filter(geneTraitSignificance,GS.StromalScore > 0.6)
+####PPI####
+####string####
+#用绿色模块基因做string####
+# https://cn.string-db.org/cgi/input?sessionId=bXmYsv7CnUrH&input_page_active_form=multiple_identifiers
+####Cytoscape####
+# 将string中下载的tsv导入cytoscape画图
+
+####作业6-1####
+#TCGA-LUAD
+#作业5得到的差异基因做单因素COX 选择p < 0.005的基因画森林图
+#作业5得到的差异基因导入string 导出tsv 导入cytoscape画图并且导出表格 取drgree前30基因画一维柱状图
+####作业6-2####
+#TCGA-COAD(文章复现)
+#下载整理TCGA-COAD的表达谱
+#计算COAD肿瘤样本ESTIMATE
+#ALKBH5 YTHDF1 和ESTIMATE相关性热图
+#ALKBH5 在肿瘤组织和正常组织表达差异 柱状图
+#YTHDF1 在肿瘤组织和正常组织表达差异 柱状图
+#ALKBH5 和 YTHDF1 相关性散点图
+#将COAD 肿瘤样本根据ALKBH5 和 YTHDF1 聚类 分为两组
+#整理COAD临床信息
+#根据cluster分组 作基线资料表
+#cluster 1组和2组 作差异分析 绘制火山图
+#差异基因做GSEA富集分析 用c5.bp.v7.0.symbols.gmt
+#计算COAD肿瘤样本的CIBERSORT ssGSEA
+#根据cluster分组画ESTIMATE CIBERSORT ssGSEA分组比较图 ICB(PDCD1 CD274 PDCD1LG2)
+#下载COAD突变数据 cluster分组绘制瀑布图
+#cluster 1组 2组 TMB差异图
+#cluster 1组 2组 MLH1 MSH2 MSH6 PMS2 POLE POLD1 这6个基因突变数量差异
+#cluster 1组和2组 的差异基因(abs(log2FoldChange)>1) 做WGCNA 与ESTIMATE做相关性分析
+#CCL4 PDCD1 GZMA NKG7 CTSW LAG3 GNLY GZMH KIR2DL4 UBASH3B WARS RARRES3 HAPLN3 SLC2A5 这14个基因做GO 画柱状图
+#14个基因自己和自己做相关性热图
+#14个基因和ESTIMATE做相关性热图
+#14个基因和CIBERSORT做相关性热图
+
+####Class8####
+####GEO数据库####
+#GEO网站：https://www.ncbi.nlm.nih.gov/geo/
+#PUBMED网站：https://pubmed.ncbi.nlm.nih.gov/
+####GSE14520####
+setwd("GSE14520")
+setwd("GEOdata")
+###加载R包
+library(tidyverse)
+chooseBioCmirror()
+#BiocManager::install('GEOquery')
+library(GEOquery)
+#下载数据，如果文件夹中有会直接读入
+Sys.setenv("VROOM_CONNECTION_SIZE"=99999999)
+gset = getGEO('GSE14520', destdir=".", AnnotGPL = F, getGPL = F)
+####分组信息与表达谱整理####
+class(gset)
+#查看数据信息
+gset[[1]]
+#通过pData函数获取分组（临床）信息
+pdata <- pData(gset[[1]])
+table(pdata$characteristics_ch1)
+#提取新的pdata1
+a <- filter(pdata,characteristics_ch1 %in% c('tissue: Liver Tumor Tissue','Tissue: Liver Tumor Tissue'))
+b <- filter(pdata,characteristics_ch1 %in% c('tissue: Liver Non-Tumor Tissue','Tissue: Liver Non-Tumor Tissue'))
+a$group <- "Tumor"
+b$group <- "Normal"
+identical(colnames(a),colnames(b))
+pdata1 <- rbind(a,b)
+table(pdata1$group)
+#pdata1是提取后的分组信息
+
+##通过exprs函数获取表达矩阵并校正
+exp <- exprs(gset[[1]])
+exp <- as.data.frame(exp)
+exp1 <- exp[,rownames(pdata1)]
+#设置参考水平
+#str_detect 检测
+group_list <- ifelse(str_detect(pdata1$group, "Tumor"), "tumor",
+                     "normal")
+#因子型
+group_list = factor(group_list,
+                    levels = c("normal","tumor"))
+boxplot(exp1,outline=FALSE, notch=T,col=group_list, las=2)
+dev.off()
+###数据校正
+library(limma) 
+exp1=normalizeBetweenArrays(exp1)
+boxplot(exp1,outline=FALSE, notch=T,col=group_list, las=2)
+range(exp1)
+#无需log转换
+dev.off()
+
+#使用R包转换id
+index = gset[[1]]@annotation #查看平台
+#BiocManager::install("hgu133a2.db")
+library(hgu133a2.db)
+ls("package:hgu133a2.db")#查看包内含有的基因名称类型
+ids <- toTable(hgu133a2SYMBOL)
+head(ids)
+#id转换
+exp1 <- as.data.frame(exp1)
+exp1 <- exp1 %>% mutate(probe_id=rownames(exp1))#mutate
+exp1 <- exp1 %>% inner_join(ids,by="probe_id") 
+exp1 <- exp1[!duplicated(exp1$symbol),]
+rownames(exp1) <- exp1$symbol
+exp1 <- exp1[,-(446:447)]#改
+tpms01A_log2 <- exp1[,rownames(a)]
+tpms11A_log2 <- exp1[,rownames(b)]
+identical(rownames(tpms01A_log2),rownames(tpms11A_log2))
+#合并
+tpms_log2 <- cbind(tpms01A_log2,tpms11A_log2)
+#保存表达谱和分组信息
+write.table(tpms01A_log2, file = "tpms01A_log2.txt",sep = "\t",row.names = T,col.names = NA,quote = F)
+write.table(tpms11A_log2, file = "tpms11A_log2.txt",sep = "\t",row.names = T,col.names = NA,quote = F)
+write.table(tpms_log2, file = "tpms_log2.txt",sep = "\t",row.names = T,col.names = NA,quote = F)
+write.table(pdata1, file = "pdata1.txt",sep = "\t",row.names = T,col.names = NA,quote = F)
+
+####GEO14520 T/N差异分析####
+setwd("GSE14520")
+setwd('T_N_DEG')
+library(tidyverse)
+#读取表达谱和分组信息
+tpms_log2 <- read.table("tpms_log2.txt", sep = "\t",row.names = 1,check.names = F,header = T)
+pdata1 <- read.table("pdata1.txt", sep = "\t",row.names = 1,check.names = F,header = T)
+#有错误 需要手动导入！！！
+#设置参考水平
+group_list <- ifelse(str_detect(pdata1$group, "Tumor"), "tumor",
+                     "normal")
+#因子型
+group_list = factor(group_list,
+                    levels = c("normal","tumor"))
+library(limma)#差异分析的包
+#理解即可
+design=model.matrix(~group_list)
+fit=lmFit(tpms_log2,design)#注意是exp1了现在
+fit=eBayes(fit)
+DEG=topTable(fit,coef=2,number = Inf)#提取排序
+save(DEG,file = "GSE14520_DEG.rda") 
+##标记上下调基因
+logFC_cutoff <- 1
+type1 = (DEG$adj.P.Val < 0.05)&(DEG$logFC < -logFC_cutoff)
+type2 = (DEG$adj.P.Val < 0.05)&(DEG$logFC > logFC_cutoff)
+DEG$change = ifelse(type1,"DOWN",ifelse(type2,"UP","NOT"))
+table(DEG$change)
+####GEO差异分析热图绘制####
+a <- filter(DEG,change == 'UP')
+b <- filter(DEG,change == 'DOWN')
+c <- rbind(a,b)
+exp_diff=tpms_log2[rownames(c),]
+library(pheatmap)
+annotation_col=data.frame(group=group_list)
+rownames(annotation_col)=colnames(exp_diff) 
+pheatmap(exp_diff,
+         annotation_col=annotation_col,
+         scale = "row",
+         show_rownames = F,
+         show_colnames =F,
+         cluster_cols =F,
+         cluster_rows =T,
+         color = colorRampPalette(c("navy", "white", "red"))(50),
+         fontsize = 10,
+         fontsize_row=3,
+         fontsize_col=3)
+dev.off()
+
+####GEO差异分析火山图####
+library(ggpubr)
+library(ggthemes)
+#下面直接跑即可
+DEG$logP <- -log10(DEG$adj.P.Val)#为什么要-log呢 数学原理
+
+ggscatter(DEG, x = "logFC", y = "logP", xlab = "log2FoldChange",
+          ylab = "-log10(Adjust P-value)",
+          color = "change",
+          palette = c("blue", "black", "red"),
+          size = 1) +
+  theme_base() +
+  geom_hline(yintercept = -log10(0.05), linetype = "dashed") +
+  geom_vline(xintercept = c(-1, 1), linetype = "dashed")
+dev.off()
+
+#添加特定基因标签
+DEG$Label = "" 
+gene <- "CDKN3" #输入你要的基因名
+DEG <- rownames_to_column(DEG,var = "Gene")
+DEG$Label[match(gene, DEG$Gene)] <- gene
+ggscatter(DEG, x = "logFC", y = "logP",
+          color = "change",
+          palette = c("blue", "black", "red"),
+          size = 1,
+          label = DEG$Label,
+          font.label = 8,
+          repel = T,
+          xlab = "log2FoldChange",
+          ylab = "-log10(Adjust P-value)") +
+  theme_base() +
+  geom_hline(yintercept = -log10(0.05), linetype = "dashed") +
+  geom_vline(xintercept = c(-1, 1), linetype = "dashed")
+
+dev.off()
+
+####GEO选定基因T/N表达差异####
+setwd("GSE14520")
+setwd("T_N_DEG")
+library(tidyverse)
+tpms01A_log2 <- read.table("tpms01A_log2.txt",sep = "\t",row.names = 1,check.names = F,stringsAsFactors = F,header = T)
+tpms11A_log2 <- read.table("tpms11A_log2.txt",sep = "\t",row.names = 1,check.names = F,stringsAsFactors = F,header = T)
+gene <- "CDKN3"#以后修改这里即可 小技巧
+#gene <- c("","","") 
+#如果想多提取几个基因怎么办 集合
+a <- tpms01A_log2[gene,]
+b <- tpms11A_log2[gene,]
+##运用传导符%>%  cltrl+shift+M 
+a <- a %>% t() %>% as.data.frame()
+b <- b %>% t() %>% as.data.frame()
+write.csv(a, file = "CDKN3_T.csv")
+write.csv(b, file = "CDKN3_N.csv")
+#仙桃画图
+#R作图
+a <- read.table("tpms_log2.txt",sep = "\t",row.names = 1,check.names = F,stringsAsFactors = F,header = T)
+a <- a %>% t() %>% as.data.frame()
+#手动导入pdata1
+identical(rownames(a),rownames(pdata1))
+#添加分组信息
+a$group <- pdata1$group
+library(ggpubr)
+library(ggsci)
+ggboxplot(a,
+          x = "group", y = "CDKN3",#可以画任何一个基因
+          fill = "group") +
+  scale_fill_lancet()+
+  stat_compare_means(comparisons = list(c(1, 2)),
+                     method = "wilcox.test",   #设置统计方法
+                     symnum.args=list(cutpoints = c(0, 0.001, 0.01, 0.05, 1),
+                                      symbols = c("***", "**", "*", "ns")))
+dev.off()
+
+####CDKN3 H/L差异分析####
+setwd("GSE14520")
+setwd("CDKN3_DEG")
+library(tidyverse)
+exp <- read.table("tpms01A_log2.txt",sep = "\t",row.names = 1,check.names = F,stringsAsFactors = F,header = T)
+gene <- "CDKN3"#每次运行只改这个基因名
+class(exp$GSM362958)
+med=median(as.numeric(exp[gene,]))
+
+#设置参考水平
+group_list <- ifelse(exp[gene,]>med,"high","low")
+#因子型
+group_list = factor(group_list,
+                    levels = c("low","high"))
+library(limma)#差异分析的包
+#理解即可
+design=model.matrix(~group_list)
+fit=lmFit(exp,design)#注意是exp了现在
+fit=eBayes(fit)
+DEG=topTable(fit,coef=2,number = Inf)#提取排序
+save(DEG,file = "CDKN3_DEG.rda") 
+#### GO KEGG GSEA CIBERSORT Xcell ssGSEA ESTIMATE ICB####
+####GO####
+setwd("GSE14520")
+setwd("FUJI_CDKN3_DEG")
+library(tidyverse)
+library("BiocManager")
+#安装加载包
+chooseBioCmirror()
+#BiocManager::install('clusterProfiler')
+#BiocManager::install('org.Hs.eg.db')
+library(org.Hs.eg.db)
+#org.Hs.eg.db包主要注释人类基因:用于不同数据库ID间的转化
+library(clusterProfiler)
+#导入差异基因文件
+DEG <- DEG %>% arrange(adj.P.Val) %>% 
+  dplyr::filter(abs(logFC) > 1, adj.P.Val < 0.05)
+
+DEG <- DEG %>% rownames_to_column("SYMBOL")
+
+genelist <- bitr(DEG$SYMBOL, fromType="SYMBOL",
+                 toType="ENTREZID", OrgDb='org.Hs.eg.db')
+DEG <- inner_join(DEG,genelist,by="SYMBOL")
+
+#GO分析
+ego <- enrichGO(gene = DEG$ENTREZID,
+                OrgDb = org.Hs.eg.db, 
+                ont = "all",
+                pAdjustMethod = "BH",
+                minGSSize = 1,
+                pvalueCutoff =0.05, 
+                qvalueCutoff =0.05,
+                readable = TRUE)
+
+ego_res <- ego@result
+save(ego,ego_res,file = "GO_CDKN3_DEG.Rda")
+
+#3. 可视化
+##3.1 柱状图
+barplot(ego, showCategory = 10,color = "pvalue")
+##3.2 气泡图
+dotplot(ego, showCategory = 10)
+##3.3 分类展示
+barplot(ego, drop = TRUE, showCategory =10,split="ONTOLOGY") + 
+  facet_grid(ONTOLOGY~., scale='free')
+dotplot(ego,showCategory = 10,split="ONTOLOGY") + 
+  facet_grid(ONTOLOGY~., scale='free')
+dev.off()
+##3.4 网络图
+#install.packages("ggnewscale")
+library(ggnewscale)
+List = DEG$logFC
+names(List)= DEG$ENTREZID
+head(List)
+List = sort(List,decreasing = T)
+
+cnetplot(ego, categorySize="pvalue", foldChange = List,colorEdge = TRUE)
+##3.5 网络图2
+cnetplot(ego, foldChange = List, circular = TRUE, colorEdge = TRUE)
+##3.6 热图
+heatplot(ego,foldChange = List)
+#GO原理
+
+####GSE14520 生存信息整理####
+setwd("GSE14520")
+setwd("Survival_data")
+library(tidyverse)
+#手动导入GSE14520_Extra_Supplement取名clinical
+clinical <- clinical[,c("Affy_GSM","Gender","Age","TNM.staging","Survival.status","Survival.months")]
+rownames(clinical) <- NULL
+rownames(clinical) <- clinical$Affy_GSM
+clinical <- clinical[,-1]
+survival <- clinical[,4:5]
+colnames(survival)[1] <- "OS"
+colnames(survival)[2] <- "OS.time"
+#colnames(survival) <- c("OS","OS.time")
+tpms01A_log2 <- read.table("tpms01A_log2.txt",sep = "\t",row.names = 1,check.names = F,stringsAsFactors = F,header = T)
+a <- intersect(rownames(survival),colnames(tpms01A_log2))
+tpms01A_log2 <- tpms01A_log2[,a]
+survival <- survival[a,]
+tpms01A_log2 <- as.data.frame(t(tpms01A_log2))
+identical(rownames(tpms01A_log2),rownames(survival))
+exp_surv_01A <- cbind(survival,tpms01A_log2)
+table(exp_surv_01A$OS)
+table(exp_surv_01A$OS.time)
+exp_surv_01A <- arrange(exp_surv_01A,OS)
+exp_surv_01A <- na.omit(exp_surv_01A)
+write.table(exp_surv_01A, file = "exp_surv_01A.txt",sep = "\t",row.names = T,col.names = NA,quote = F)
+####GSE14520 临床信息整理####
+clinical <- clinical[,1:3]
+colnames(clinical)[3] <- "Stage"
+tpms01A_log2 <- read.table("tpms01A_log2.txt",sep = "\t",row.names = 1,check.names = F,stringsAsFactors = F,header = T)
+a <- intersect(rownames(clinical),colnames(tpms01A_log2))
+tpms01A_log2 <- tpms01A_log2[,a]
+clinical <- clinical[a,]
+tpms01A_log2 <- as.data.frame(t(tpms01A_log2))
+identical(rownames(tpms01A_log2),rownames(clinical))
+exp_clinical_01A <- cbind(clinical,tpms01A_log2)
+table(exp_clinical_01A$Gender)
+table(exp_clinical_01A$Age)
+table(exp_clinical_01A$Stage)
+exp_clinical_01A <- arrange(exp_clinical_01A,Gender)
+exp_clinical_01A <- exp_clinical_01A[-(1:4),]
+table(exp_clinical_01A$Gender)
+table(exp_clinical_01A$Age)
+table(exp_clinical_01A$Stage)
+exp_clinical_01A <- arrange(exp_clinical_01A,Stage)
+exp_clinical_01A <- exp_clinical_01A[-(1:2),]
+table(exp_clinical_01A$Gender)
+table(exp_clinical_01A$Age)
+table(exp_clinical_01A$Stage)
+exp_clinical_01A$Stage <- gsub("A","",exp_clinical_01A$Stage)
+exp_clinical_01A$Stage <- gsub("B","",exp_clinical_01A$Stage)
+exp_clinical_01A$Stage <- gsub("C","",exp_clinical_01A$Stage)
+table(exp_clinical_01A$Stage)
+write.table(exp_clinical_01A, file = "exp_clinical_01A.txt",sep = "\t",row.names = T,col.names = NA,quote = F)
+
+#合并survival clinical
+b <- intersect(rownames(exp_clinical_01A),rownames(exp_surv_01A))
+exp_clinical_01A <- exp_clinical_01A[b,]
+exp_surv_01A <- exp_surv_01A[b,]
+x <- exp_clinical_01A[,1:3]
+y <- exp_surv_01A[,1:2]
+z <- exp_surv_01A[,3:12645]
+exp_surv_clinical_01A <- cbind(y,x,z)
+write.table(exp_surv_clinical_01A, file = "exp_surv_clinical_01A.txt",sep = "\t",row.names = T,col.names = NA,quote = F)
+#CDKN3 生存曲线 ROC timeROC CDKN3-DEG做单因素COX并且取前10画图 多因素COX
+
+####GSE39582####
+setwd("GSE39582")
+setwd("GEOdata")
+###加载R包
+library(tidyverse)
+chooseBioCmirror()
+#BiocManager::install('GEOquery')
+library(GEOquery)
+#下载数据，如果文件夹中有会直接读入
+Sys.setenv("VROOM_CONNECTION_SIZE"=99999999)
+gset = getGEO('GSE39582', destdir=".", AnnotGPL = F, getGPL = F)
+####分组信息与表达谱整理####
+class(gset)
+#查看数据信息
+gset[[1]]
+#通过pData函数获取分组（临床）信息
+pdata <- pData(gset[[1]])
+table(pdata$characteristics_ch1.8)
+##通过exprs函数获取表达矩阵并校正
+exp <- exprs(gset[[1]])
+exp <- as.data.frame(exp)
+range(exp)
+#数据矫正
+boxplot(exp,outline=FALSE, notch=T, las=2)
+dev.off()
+library(limma) 
+exp=normalizeBetweenArrays(exp)
+boxplot(exp,outline=FALSE, notch=T, las=2)
+range(exp)
+dev.off()
+
+#使用R包转换id
+index = gset[[1]]@annotation #查看平台
+#BiocManager::install("hgu133plus2.db")
+library(hgu133plus2.db)
+ls("package:hgu133plus2.db")#查看包内含有的基因名称类型
+ids <- toTable(hgu133plus2SYMBOL)
+head(ids)
+#id转换
+exp <- as.data.frame(exp)
+exp <- exp %>% mutate(probe_id=rownames(exp))#mutate
+exp <- exp %>% inner_join(ids,by="probe_id") 
+exp <- exp[!duplicated(exp$symbol),]
+rownames(exp) <- exp$symbol
+exp <- exp[,-(586:587)]#改
+#合并
+identical(rownames(pdata),colnames(exp))
+#保存表达谱和临床信息
+write.table(exp, file = "tpms01A_log2.txt",sep = "\t",row.names = T,col.names = NA,quote = F)
+write.table(pdata, file = "pdata.txt",sep = "\t",row.names = T,col.names = NA,quote = F)
+
+####CDKN3 H/L差异分析####
+#现场做给大家看
+setwd("GSE39582")
+setwd("CDKN3_DEG")
+library(tidyverse)
+exp <- read.table("tpms01A_log2.txt",sep = "\t",row.names = 1,check.names = F,stringsAsFactors = F,header = T)
+gene <- "CDKN3"#每次运行只改这个基因名
+class(exp$GSM971957)
+med=median(as.numeric(exp[gene,]))
+
+#设置参考水平
+group_list <- ifelse(exp[gene,]>med,"high","low")
+#因子型
+group_list = factor(group_list,
+                    levels = c("low","high"))
+library(limma)#差异分析的包
+#理解即可
+design=model.matrix(~group_list)
+fit=lmFit(exp,design)#注意是exp了现在
+fit=eBayes(fit)
+DEG=topTable(fit,coef=2,number = Inf)#提取排序
+save(DEG,file = "CDKN3_DEG.rda") 
+
+####GSE6044 肺腺癌####
+setwd("GSE6044")
+setwd("xian")
+setwd("GEOdata")
+###加载R包
+library(tidyverse)
+chooseBioCmirror()
+#BiocManager::install('GEOquery')
+library(GEOquery)
+#下载数据，如果文件夹中有会直接读入
+Sys.setenv("VROOM_CONNECTION_SIZE"=99999999)
+gset = getGEO('GSE6044', destdir=".", AnnotGPL = F, getGPL = F)
+####分组信息与表达谱整理####
+class(gset)
+#查看数据信息
+gset[[1]]
+#通过pData函数获取分组（临床）信息
+pdata <- pData(gset[[1]])
+table(pdata$characteristics_ch1.2)
+#提取新的pdata1
+a <- filter(pdata,characteristics_ch1.2 == 'disease: Adenocarcinoma')
+b <- filter(pdata,characteristics_ch1.2 == 'disease: Normal Lung Tissue')
+identical(colnames(a),colnames(b))
+pdata1 <- rbind(a,b)
+table(pdata1$characteristics_ch1.2)
+#pdata1是提取后的分组信息
+
+##通过exprs函数获取表达矩阵并校正
+exp <- exprs(gset[[1]])
+exp1 <- exp[,rownames(pdata1)]
+#设置参考水平
+#str_detect 检测
+group_list <- ifelse(str_detect(pdata1$characteristics_ch1.2, "disease: Adenocarcinoma"), "tumor",
+                     "normal")
+#因子型
+group_list = factor(group_list,
+                    levels = c("normal","tumor"))
+boxplot(exp1,outline=FALSE, notch=T,col=group_list, las=2)
+dev.off()
+###数据校正
+library(limma) 
+exp1=normalizeBetweenArrays(exp1)
+boxplot(exp1,outline=FALSE, notch=T,col=group_list, las=2)
+range(exp1)
+dev.off()
+
+#使用R包转换id
+index = gset[[1]]@annotation #查看平台
+#BiocManager::install("hgfocus.db")
+library(hgfocus.db)
+ls("package:hgfocus.db")#查看包内含有的基因名称类型
+ids <- toTable(hgfocusSYMBOL)
+head(ids)
+#id转换
+exp1 <- as.data.frame(exp1)
+exp1 <- exp1 %>% mutate(probe_id=rownames(exp1))#mutate
+exp1 <- exp1 %>% inner_join(ids,by="probe_id") 
+exp1 <- exp1[!duplicated(exp1$symbol),]
+rownames(exp1) <- exp1$symbol
+exp1 <- exp1[,-(22:23)]#改
+identical(rownames(pdata1),colnames(exp1))
+
+tpms_log2 <- exp1
+tpms01A_log2 <- tpms_log2[,rownames(a)]
+tpms11A_log2 <- tpms_log2[,rownames(b)]
+
+#保存表达谱和分组信息
+write.table(tpms_log2, file = "tpms_log2.txt",sep = "\t",row.names = T,col.names = NA,quote = F)
+write.table(tpms01A_log2, file = "tpms01A_log2.txt",sep = "\t",row.names = T,col.names = NA,quote = F)
+write.table(tpms11A_log2, file = "tpms11A_log2.txt",sep = "\t",row.names = T,col.names = NA,quote = F)
+
+write.table(pdata1, file = "pdata1.txt",sep = "\t",row.names = T,col.names = NA,quote = F)
+
+####GSE6044 肺鳞癌####
+setwd("GSE6044")
+setwd("lin")
+setwd("GEOdata")
+###加载R包
+library(tidyverse)
+chooseBioCmirror()
+#BiocManager::install('GEOquery')
+library(GEOquery)
+#下载数据，如果文件夹中有会直接读入
+Sys.setenv("VROOM_CONNECTION_SIZE"=99999999)
+gset = getGEO('GSE6044', destdir=".", AnnotGPL = F, getGPL = F)
+####分组信息与表达谱整理####
+class(gset)
+#查看数据信息
+gset[[1]]
+#通过pData函数获取分组（临床）信息
+pdata <- pData(gset[[1]])
+table(pdata$characteristics_ch1.2)
+#提取新的pdata1
+a <- filter(pdata,characteristics_ch1.2 %in% c('disease: Squamous Cell Cancer',"disease: Squamous Cell Carcinoma"))
+b <- filter(pdata,characteristics_ch1.2 == 'disease: Normal Lung Tissue')
+a$group <- "Tumor"
+b$group <- "Normal"
+identical(colnames(a),colnames(b))
+pdata1 <- rbind(a,b)
+table(pdata1$group)
+#pdata1是提取后的分组信息
+
+##通过exprs函数获取表达矩阵并校正
+exp <- exprs(gset[[1]])
+exp1 <- exp[,rownames(pdata1)]
+#设置参考水平
+#str_detect 检测
+group_list <- ifelse(str_detect(pdata1$group, "Tumor"), "tumor",
+                     "normal")
+#因子型
+group_list = factor(group_list,
+                    levels = c("normal","tumor"))
+boxplot(exp1,outline=FALSE, notch=T,col=group_list, las=2)
+dev.off()
+###数据校正
+library(limma) 
+exp1=normalizeBetweenArrays(exp1)
+boxplot(exp1,outline=FALSE, notch=T,col=group_list, las=2)
+range(exp1)
+dev.off()
+
+#使用R包转换id
+index = gset[[1]]@annotation #查看平台
+#BiocManager::install("hgfocus.db")
+library(hgfocus.db)
+ls("package:hgfocus.db")#查看包内含有的基因名称类型
+ids <- toTable(hgfocusSYMBOL)
+head(ids)
+#id转换
+exp1 <- as.data.frame(exp1)
+exp1 <- exp1 %>% mutate(probe_id=rownames(exp1))#mutate
+exp1 <- exp1 %>% inner_join(ids,by="probe_id") 
+exp1 <- exp1[!duplicated(exp1$symbol),]
+rownames(exp1) <- exp1$symbol
+exp1 <- exp1[,-(21:22)]#改
+identical(rownames(pdata1),colnames(exp1))
+
+tpms_log2 <- exp1
+tpms01A_log2 <- tpms_log2[,rownames(a)]
+tpms11A_log2 <- tpms_log2[,rownames(b)]
+
+#保存表达谱和分组信息
+write.table(tpms_log2, file = "tpms_log2.txt",sep = "\t",row.names = T,col.names = NA,quote = F)
+write.table(tpms01A_log2, file = "tpms01A_log2.txt",sep = "\t",row.names = T,col.names = NA,quote = F)
+write.table(tpms11A_log2, file = "tpms11A_log2.txt",sep = "\t",row.names = T,col.names = NA,quote = F)
+
+write.table(pdata1, file = "pdata1.txt",sep = "\t",row.names = T,col.names = NA,quote = F)
+
+#####GSE84437####
+setwd("GSE84437")
+setwd("GEOdata")
+###加载R包
+library(tidyverse)
+chooseBioCmirror()
+#BiocManager::install('GEOquery')
+library(GEOquery)
+#下载数据，如果文件夹中有会直接读入
+Sys.setenv("VROOM_CONNECTION_SIZE"=99999999)
+gset = getGEO('GSE84437', destdir=".", AnnotGPL = F, getGPL = F)
+####分组信息与表达谱整理####
+class(gset)
+#查看数据信息
+gset[[1]]
+#通过pData函数获取分组（临床）信息
+pdata <- pData(gset[[1]])
+table(pdata$source_name_ch1)
+##通过exprs函数获取表达矩阵并校正
+exp <- exprs(gset[[1]])
+exp <- as.data.frame(exp)
+range(exp)
+exp <- na.omit(exp)
+range(exp)
+#数据矫正
+boxplot(exp,outline=FALSE, notch=T, las=2)
+dev.off()
+library(limma) 
+exp=normalizeBetweenArrays(exp)
+boxplot(exp,outline=FALSE, notch=T, las=2)
+range(exp)
+exp <- as.data.frame(exp)
+exp <- log2(exp)
+range(exp)
+dev.off()
+
+#手动转换id
+ids <- ids[,c(1,14)]
+ids <- filter(ids,ids$Symbol != '')
+colnames(ids)[1] <- "probe_id"
+colnames(ids)[2] <- "symbol"
+
+exp <- exp %>% mutate(probe_id=rownames(exp))#mutate
+exp <- exp %>% inner_join(ids,by="probe_id") 
+exp <- exp[!duplicated(exp$symbol),]
+rownames(exp) <- exp$symbol
+exp <- exp[,-(484:485)]#改
+range(exp)
+#合并
+identical(rownames(pdata),colnames(exp))
+#保存表达谱和临床信息
+write.table(exp, file = "tpms01A_log2.txt",sep = "\t",row.names = T,col.names = NA,quote = F)
+write.table(pdata, file = "pdata.txt",sep = "\t",row.names = T,col.names = NA,quote = F)
+
+####整理生存信息####
+survival <- pdata[,c("death:ch1","duration overall survival:ch1")]
+colnames(survival) <- c("OS","OS.time")
+table(survival$OS)
+table(survival$OS.time)
+survival <- na.omit(survival)
+exp <- as.data.frame(t(exp))
+exp <- exp[rownames(survival),]
+identical(rownames(exp),rownames(survival))
+write.table(survival,"surv_01A.txt",sep = "\t",row.names = T,col.names = NA,quote = F)
+exp_surv_01A <- cbind(survival,exp)
+write.table(exp_surv_01A,"exp_surv_01A.txt",sep = "\t",row.names = T,col.names = NA,quote = F)
+
+####GSE131761####
+setwd("GSE131761")
+setwd("GEOdata")
+###加载R包
+library(tidyverse)
+chooseBioCmirror()
+#BiocManager::install('GEOquery')
+library(GEOquery)
+#下载数据，如果文件夹中有会直接读入
+Sys.setenv("VROOM_CONNECTION_SIZE"=99999999)
+gset = getGEO('GSE131761', destdir=".", AnnotGPL = F, getGPL = F)
+####分组信息与表达谱整理####
+class(gset)
+#查看数据信息
+gset[[1]]
+#通过pData函数获取分组（临床）信息
+pdata <- pData(gset[[1]])
+table(pdata$characteristics_ch1)
+#提取新的pdata1
+a <- filter(pdata,characteristics_ch1 == 'diagnosis: septic shock')
+b <- filter(pdata,characteristics_ch1 == 'diagnosis: control patient')
+a$group <- "P"
+b$group <- "C"
+identical(colnames(a),colnames(b))
+pdata1 <- rbind(a,b)
+table(pdata1$group)
+#pdata1是提取后的分组信息
+
+##通过exprs函数获取表达矩阵并校正
+exp <- exprs(gset[[1]])
+exp <- as.data.frame(exp)
+exp1 <- exp[,rownames(pdata1)]
+#设置参考水平
+#str_detect 检测
+group_list <- ifelse(str_detect(pdata1$group, "P"), "P",
+                     "C")
+#因子型
+group_list = factor(group_list,
+                    levels = c("C","P"))
+boxplot(exp1,outline=FALSE, notch=T,col=group_list, las=2)
+dev.off()
+###数据校正
+library(limma) 
+exp1=normalizeBetweenArrays(exp1)
+boxplot(exp1,outline=FALSE, notch=T,col=group_list, las=2)
+range(exp1)
+#无需log转换
+dev.off()
+
+#手动转换id
+ids <- ids[,c(1,7)]
+ids <- filter(ids,ids$GENE_SYMBOL != '')
+colnames(ids)[1] <- "probe_id"
+colnames(ids)[2] <- "symbol"
+
+exp1 <- as.data.frame(exp1)
+exp1 <- exp1 %>% mutate(probe_id=rownames(exp1))#mutate
+exp1 <- exp1 %>% inner_join(ids,by="probe_id") 
+exp1 <- exp1[!duplicated(exp1$symbol),]
+rownames(exp1) <- exp1$symbol
+exp1 <- exp1[,-(97:98)]#改
+exp_P <- exp1[,rownames(a)]
+exp_C <- exp1[,rownames(b)]
+identical(rownames(exp_P),rownames(exp_C))
+#合并
+exp_all <- cbind(exp_P,exp_C)
+#保存表达谱和分组信息
+write.table(exp_all, file = "exp_all.txt",sep = "\t",row.names = T,col.names = NA,quote = F)
+write.table(exp_P, file = "exp_P.txt",sep = "\t",row.names = T,col.names = NA,quote = F)
+write.table(exp_C, file = "exp_C.txt",sep = "\t",row.names = T,col.names = NA,quote = F)
+write.table(pdata1, file = "pdata1.txt",sep = "\t",row.names = T,col.names = NA,quote = F)
+
+####GSE137342####
+setwd("GSE137342")
+setwd("GEOdata")
+###加载R包
+library(tidyverse)
+chooseBioCmirror()
+#BiocManager::install('GEOquery')
+library(GEOquery)
+#下载数据，如果文件夹中有会直接读入
+Sys.setenv("VROOM_CONNECTION_SIZE"=99999999)
+gset = getGEO('GSE137342', destdir=".", AnnotGPL = F, getGPL = F)
+####分组信息与表达谱整理####
+class(gset)
+#查看数据信息
+gset[[1]]
+#通过pData函数获取分组（临床）信息
+pdata <- pData(gset[[1]])
+table(pdata$characteristics_ch1.3)
+#提取新的pdata1
+a <- filter(pdata,characteristics_ch1.3 %in% c('diagnosis: Sepsis','diagnosis: Septic Shock','diagnosis: Severe Sepsis'))
+b <- filter(pdata,characteristics_ch1.3 == 'diagnosis: Healthy')
+a$group <- "P"
+b$group <- "C"
+identical(colnames(a),colnames(b))
+pdata1 <- rbind(a,b)
+table(pdata1$group)
+#pdata1是提取后的分组信息
+
+##通过exprs函数获取表达矩阵并校正
+exp <- exprs(gset[[1]])
+exp <- as.data.frame(exp)
+exp1 <- exp[,rownames(pdata1)]
+#设置参考水平
+#str_detect 检测
+group_list <- ifelse(str_detect(pdata1$group, "P"), "P",
+                     "C")
+#因子型
+group_list = factor(group_list,
+                    levels = c("C","P"))
+boxplot(exp1,outline=FALSE, notch=T,col=group_list, las=2)
+dev.off()
+###数据校正
+library(limma) 
+exp1=normalizeBetweenArrays(exp1)
+boxplot(exp1,outline=FALSE, notch=T,col=group_list, las=2)
+range(exp1)
+#无需log转换
+dev.off()
+
+#手动转换id
+ids <- ids[,c(1,13)]
+ids <- filter(ids,ids$Symbol != '')
+colnames(ids)[1] <- "probe_id"
+colnames(ids)[2] <- "symbol"
+
+exp1 <- as.data.frame(exp1)
+exp1 <- exp1 %>% mutate(probe_id=rownames(exp1))#mutate
+exp1 <- exp1 %>% inner_join(ids,by="probe_id") 
+exp1 <- exp1[!duplicated(exp1$symbol),]
+rownames(exp1) <- exp1$symbol
+exp1 <- exp1[,-(56:57)]#改
+exp_P <- exp1[,rownames(a)]
+exp_C <- exp1[,rownames(b)]
+identical(rownames(exp_P),rownames(exp_C))
+#合并
+exp_all <- cbind(exp_P,exp_C)
+#保存表达谱和分组信息
+write.table(exp_all, file = "exp_all.txt",sep = "\t",row.names = T,col.names = NA,quote = F)
+write.table(exp_P, file = "exp_P.txt",sep = "\t",row.names = T,col.names = NA,quote = F)
+write.table(exp_C, file = "exp_C.txt",sep = "\t",row.names = T,col.names = NA,quote = F)
+write.table(pdata1, file = "pdata1.txt",sep = "\t",row.names = T,col.names = NA,quote = F)
+
+####Class9####
+####LASSO####
+setwd("TCGA-STAD")
+setwd("LASSO")
+#install.packages("glmnet")
+#install.packages("survival")
+library(glmnet)
+library(tidyverse)
+library(ggplot2)
+library(survival)
+library(forestplot)
+library(tidyverse)
+#读取文件
+exp_surv_01A = read.table("exp_surv_01A.txt",sep = "\t",row.names = 1,check.names = F,stringsAsFactors = F,header = T)
+#读取TCGA-STAD 肿瘤/正常差异分析结果rda文件
+DEG <- as.data.frame(res)%>% 
+  arrange(padj) %>% 
+  dplyr::filter(abs(log2FoldChange) > 2, padj < 0.05)
+#整合
+exp_deg_01A <- exp_surv_01A[,rownames(DEG)]
+a <- exp_surv_01A[,1:2]
+identical(rownames(a),rownames(exp_deg_01A))
+surv.expr <- cbind(a,exp_deg_01A)
+#Cox分析
+#如何修改特定列的列名
+#colnames(surv.expr)[ ] <- " "  #[]内填特定列数字 ""内填写修改的名字
+Coxoutput <- NULL 
+
+for(i in 3:ncol(surv.expr)){
+  g <- colnames(surv.expr)[i]
+  cox <- coxph(Surv(OS.time,OS) ~ surv.expr[,i], data = surv.expr) # 单变量cox模型
+  coxSummary = summary(cox)
+  
+  Coxoutput <- rbind.data.frame(Coxoutput,
+                                data.frame(gene = g,
+                                           HR = as.numeric(coxSummary$coefficients[,"exp(coef)"])[1],
+                                           z = as.numeric(coxSummary$coefficients[,"z"])[1],
+                                           pvalue = as.numeric(coxSummary$coefficients[,"Pr(>|z|)"])[1],
+                                           lower = as.numeric(coxSummary$conf.int[,3][1]),
+                                           upper = as.numeric(coxSummary$conf.int[,4][1]),
+                                           stringsAsFactors = F),
+                                stringsAsFactors = F)
+}
+
+Coxoutput <- arrange(Coxoutput,pvalue)
+
+#筛选基因
+gene_sig <- Coxoutput[which(Coxoutput$pvalue < 0.05),] # 取出p值小于0.05的基因
+
+#整理LASSO输入数据
+rt <- cbind(exp_surv_01A[,1:2],exp_surv_01A[,gene_sig$gene])
+#lasso不能有NA OS.time不能有0
+rt <- na.omit(rt)
+rt <- rt %>% filter(rt$OS.time != 0)
+#更换OS,OS.time位置
+rt <- cbind(rt$OS.time,rt$OS,rt[,3:ncol(rt)])
+#更改1，2列列名
+colnames(rt)[1] <- "futime"
+colnames(rt)[2] <- "fustat"
+#数据准备完毕
+set.seed(555) 
+x <- as.matrix(rt[,c(3:ncol(rt))])
+y <- data.matrix(Surv(rt$futime,rt$fustat))
+fit <- glmnet(x, y, family = "cox", maxit = 1000)
+plot(fit, xvar = "lambda", label = TRUE)
+
+cvfit = cv.glmnet(x, y, family="cox", maxit = 1000)
+plot(cvfit)
+#其中两条虚线分别指示了两个特殊的λ值
+dev.off()
+###4. 输出预测模型的相关系数与riskScore
+###4.1 输出相关系数
+coef=coef(fit, s = cvfit$lambda.min)
+index=which(coef != 0)
+actCoef=coef[index]
+lassoGene=row.names(coef)[index]
+geneCoef=cbind(Gene=lassoGene,Coef=actCoef)
+geneCoef   #查看模型的相关系数
+write.csv(geneCoef,file = "geneCoef.csv")
+###4.2 计算riskScore
+FinalGeneExp = rt[,lassoGene]
+myFun = function(x){crossprod(as.numeric(x),actCoef)}
+riskScore = apply(FinalGeneExp,1,myFun)
+outCol = c("futime", "fustat", lassoGene)
+risk = as.vector(ifelse(riskScore > median(riskScore), "high", "low"))
+dat = cbind(rt[,outCol], riskScore=as.vector(riskScore), risk)
+
+###5. 绘制散点分布图
+#install.packages("ggpubr")
+library(ggpubr)  
+p <- ggboxplot(dat, x = "fustat", y = "riskScore",
+               color = "fustat", palette = "jco",
+               add = "jitter")
+p <- p + stat_compare_means()   #  Add p-value
+p   #得出预测结果
+
+###6. ROC判断预测结果的准确性
+library(pROC)
+class(dat$fustat)
+dat$fustat <- as.character(dat$fustat)
+class(dat$fustat)
+dat$Type <- ifelse(str_detect(dat$fustat, "0"), "alive","dead")
+ROC1 <- roc(dat$Type, dat$riskScore,
+            levels = c("alive", "dead"))
+plot(ROC1,
+     add = FALSE,   #不添加至上一图层
+     col = 'red',   #设置曲线颜色
+     legacy.axes = TRUE,   #使x轴变为1-Specificity
+     xlab = "1-Specificity",
+     print.auc =TRUE,
+     print.auc.x = 0.5,   #输出auc值的x轴位置
+     print.auc.y = 0.5,   #输出auc值的y轴位置
+     auc.polygon = TRUE,   #将auc曲线下面积转换为多边形
+     auc.polygon.col = "#fff7f7",   #设置多边形的填充色
+     grid = c(0.5, 0.2),   #设置两轴网格线的间隔为0.5，0.2
+     grid.col = c("black", "black"),   #设置两轴网格线的颜色
+     print.thres = TRUE)
+
+
+#画风险分布图
+#y=生存时间
+rt <- dat
+color=as.vector(rt$fustat)
+color[color==1]="indianred1"
+color[color==0]="lightseagreen"
+plot(rt$futime, pch=19,
+     xlab="Patients (increasing risk socre)", ylab="Survival time (Days)",
+     col=color)
+legend("topleft", c("Dead", "Alive"),bty="n",pch=19,col=c("indianred1","lightseagreen"),cex=1.2)
+riskClass=rt[,"risk"]
+lowLength=length(riskClass[riskClass=="low"])
+highLength=length(riskClass[riskClass=="high"])
+abline(v=lowLength,lty=2)
+dev.off()
+
+#y=riskscore
+rt <- arrange(rt,riskScore)
+riskClass=rt[,"risk"]
+lowLength=length(riskClass[riskClass=="low"])
+highLength=length(riskClass[riskClass=="high"])
+line=rt[,"riskScore"]
+line[line>10]=10
+plot(line, type="p", pch=20,
+     xlab="Patients (increasing risk socre)", ylab="Risk score",
+     col=c(rep("lightseagreen",lowLength),rep("indianred1",highLength)) )
+abline(h=median(rt$riskScore),v=lowLength,lty=2)
+legend("topleft", c("High risk", "low Risk"),bty="n",pch=19,col=c("indianred1","lightseagreen"),cex=1.2)
+dev.off()
+#设置不同的种子尝试一下 用结果最好的那个种子
+
+#用riskscore（在rt表格里）做单因素和多因素COX
+exp_surv_clinical_01A = read.table("exp_surv_clinical_01A.txt",sep = "\t",row.names = 1,check.names = F,stringsAsFactors = F,header = T)
+a <- intersect(rownames(rt),rownames(exp_surv_clinical_01A))
+rt <- rt[a,]
+exp_surv_clinical_01A <- exp_surv_clinical_01A[a,]
+surv.expr <- cbind(exp_surv_clinical_01A[,1:8],rt[,(ncol(rt)-2)])
+colnames(surv.expr)[9] <- "riskscore"
+table(surv.expr$OS)
+table(surv.expr$OS.time)
+table(surv.expr$gender)
+table(surv.expr$age_at_index)
+table(surv.expr$ajcc_pathologic_stage)
+table(surv.expr$ajcc_pathologic_t)
+table(surv.expr$ajcc_pathologic_n)
+table(surv.expr$ajcc_pathologic_m)
+table(surv.expr$riskscore)
+
+#单因素COX
+#install.packages("survival")
+#install.packages("forestplot")
+library(survival)
+library(forestplot)
+Coxoutput <- NULL 
+for(i in 3:ncol(surv.expr)){
+  g <- colnames(surv.expr)[i]
+  cox <- coxph(Surv(OS.time,OS) ~ surv.expr[,i], data = surv.expr) # 单变量cox模型
+  coxSummary = summary(cox)
+  
+  Coxoutput <- rbind.data.frame(Coxoutput,
+                                data.frame(gene = g,
+                                           HR = as.numeric(coxSummary$coefficients[,"exp(coef)"])[1],
+                                           z = as.numeric(coxSummary$coefficients[,"z"])[1],
+                                           pvalue = as.numeric(coxSummary$coefficients[,"Pr(>|z|)"])[1],
+                                           lower = as.numeric(coxSummary$conf.int[,3][1]),
+                                           upper = as.numeric(coxSummary$conf.int[,4][1]),
+                                           stringsAsFactors = F),
+                                stringsAsFactors = F)
+}
+
+write.table(Coxoutput, file = "uni_cox_results.txt",sep = "\t",row.names = T,col.names = NA,quote = F)
+topgene <- Coxoutput
+#3. 绘制森林图
+##3.1 输入表格的制作
+tabletext <- cbind(c("characteristics",topgene$gene),
+                   c("HR",format(round(as.numeric(topgene$HR),3),nsmall = 3)),
+                   c("lower 95%CI",format(round(as.numeric(topgene$lower),3),nsmall = 3)),
+                   c("upper 95%CI",format(round(as.numeric(topgene$upper),3),nsmall = 3)),
+                   c("pvalue",format(round(as.numeric(topgene$p),3),nsmall = 3)))
+##3.2 绘制森林图
+forestplot(labeltext=tabletext,
+           mean=c(NA,as.numeric(topgene$HR)),
+           lower=c(NA,as.numeric(topgene$lower)), 
+           upper=c(NA,as.numeric(topgene$upper)),
+           graph.pos=5,# 图在表中的列位置
+           graphwidth = unit(.25,"npc"),# 图在表中的宽度比
+           fn.ci_norm="fpDrawDiamondCI",# box类型选择钻石
+           col=fpColors(box="#00A896", lines="#02C39A", zero = "black"),# box颜色
+           
+           boxsize=0.4,# box大小固定
+           lwd.ci=1,
+           ci.vertices.height = 0.1,ci.vertices=T,# 显示区间
+           zero=1,# zero线横坐标
+           lwd.zero=1.5,# zero线宽
+           xticks = c(0.5,1,5),# 横坐标刻度根据需要可随意设置
+           lwd.xaxis=2,
+           xlab="Hazard ratios",
+           txt_gp=fpTxtGp(label=gpar(cex=1.2),# 各种字体大小设置
+                          ticks=gpar(cex=0.85),
+                          xlab=gpar(cex=1),
+                          title=gpar(cex=1.5)),
+           hrzl_lines=list("1" = gpar(lwd=2, col="black"), # 在第一行上面画黑色实线
+                           "2" = gpar(lwd=1.5, col="black"), # 在第一行标题行下画黑色实线
+                           "9" = gpar(lwd=2, col="black")), # 在最后一行上画黑色实线
+           lineheight = unit(.75,"cm"),# 固定行高
+           colgap = unit(0.3,"cm"),
+           mar=unit(rep(1.5, times = 4), "cm"),
+           new_page = F
+)
+dev.off()
+
+#多因素Cox
+Coxoutput <- NULL 
+cox <- coxph(Surv(OS.time,OS) ~ gender + age_at_index + ajcc_pathologic_stage + 
+               ajcc_pathologic_t + ajcc_pathologic_n + ajcc_pathologic_m + riskscore ,
+             data = surv.expr) # 多变量cox模型
+coxSummary = summary(cox)
+
+Coxoutput <- rbind.data.frame(Coxoutput,
+                              data.frame(characteristics = rownames(coxSummary$coefficients),
+                                         HR = as.numeric(coxSummary$coefficients[,"exp(coef)"]),
+                                         z = as.numeric(coxSummary$coefficients[,"z"]),
+                                         pvalue = as.numeric(coxSummary$coefficients[,"Pr(>|z|)"]),
+                                         lower = as.numeric(coxSummary$conf.int[,3]),
+                                         upper = as.numeric(coxSummary$conf.int[,4]),
+                                         stringsAsFactors = F),
+                              stringsAsFactors = F)
+
+write.table(Coxoutput, file = "mul_cox_results.txt",sep = "\t",row.names = F,col.names = T,quote = F)
+topgene <- Coxoutput#去除NA 并且为了下面不改名字 把Coxoutput变成topgene
+#3. 绘制森林图
+##3.1 输入表格的制作
+tabletext <- cbind(c("characteristics",topgene$characteristics),
+                   c("HR",format(round(as.numeric(topgene$HR),3),nsmall = 3)),
+                   c("lower 95%CI",format(round(as.numeric(topgene$lower),3),nsmall = 3)),
+                   c("upper 95%CI",format(round(as.numeric(topgene$upper),3),nsmall = 3)),
+                   c("pvalue",format(round(as.numeric(topgene$p),3),nsmall = 3)))
+##3.2 绘制森林图
+forestplot(labeltext=tabletext,
+           mean=c(NA,as.numeric(topgene$HR)),
+           lower=c(NA,as.numeric(topgene$lower)), 
+           upper=c(NA,as.numeric(topgene$upper)),
+           graph.pos=5,# 图在表中的列位置
+           graphwidth = unit(.25,"npc"),# 图在表中的宽度比
+           fn.ci_norm="fpDrawDiamondCI",# box类型选择钻石
+           col=fpColors(box="#00A896", lines="#02C39A", zero = "black"),# box颜色
+           
+           boxsize=0.4,# box大小固定
+           lwd.ci=1,
+           ci.vertices.height = 0.1,ci.vertices=T,# 显示区间
+           zero=1,# zero线横坐标
+           lwd.zero=1.5,# zero线宽
+           xticks = c(0.5,1,1.5),# 横坐标刻度根据需要可随意设置
+           lwd.xaxis=2,
+           xlab="Hazard ratios",
+           txt_gp=fpTxtGp(label=gpar(cex=1.2),# 各种字体大小设置
+                          ticks=gpar(cex=0.85),
+                          xlab=gpar(cex=1),
+                          title=gpar(cex=1.5)),
+           hrzl_lines=list("1" = gpar(lwd=2, col="black"), # 在第一行上面画黑色实线
+                           "2" = gpar(lwd=1.5, col="black"), # 在第一行标题行下画黑色实线
+                           "15" = gpar(lwd=2, col="black")), # 在最后一行上画黑色实线
+           lineheight = unit(.75,"cm"),# 固定行高
+           colgap = unit(0.3,"cm"),
+           mar=unit(rep(1.5, times = 4), "cm"),
+           new_page = F
+)
+dev.off()
+
+####nomogram列线图####
+library(rms)
+library(foreign)
+library(survival)
+identical(rownames(rt),rownames(surv.expr))
+surv.expr$age <- ifelse(surv.expr$age_at_index >=60,">=60","<60")
+rt2 <- cbind(surv.expr[,1:2],surv.expr$age,surv.expr$gender,surv.expr[,5:8], rt[,ncol(rt)-1])
+colnames(rt2)[1] <- "fustat"
+colnames(rt2)[2] <- "futime"
+colnames(rt2)[3] <- "age"
+colnames(rt2)[4] <- "gender"
+colnames(rt2)[5] <- "stage"
+colnames(rt2)[6] <- "T"
+colnames(rt2)[7] <- "N"
+colnames(rt2)[8] <- "M"
+colnames(rt2)[9] <- "risk"
+rt2$futime <- rt2$futime/365#变成以年为单位
+#设置参数
+rt2$age <- factor(rt2$age,labels=c("<60", ">=60"))
+rt2$gender <- factor(rt2$gender,labels=c("Female", "Male"))
+rt2$stage <- factor(rt2$stage,labels=c("StageI", "StageII", "StageIII", "StageIV"))
+rt2$T <- factor(rt2$T,labels=c("T1", "T2", "T3", "T4"))
+rt2$M <- factor(rt2$M,labels=c("M0", "M1"))
+rt2$N <- factor(rt2$N,labels=c("N0", "N1","N2","N3"))
+rt2$risk <- factor(rt2$risk,labels=c("high", "low"))
+
+#这两句无需掌握
+ddist <- datadist(rt2)
+options(datadist='ddist')   #使用函数datadist()将数据打包
+
+###4. 构建Cox回归模型
+f <- cph(Surv(futime, fustat) ~age + gender + stage + T + M + N + risk, x=T, y=T, surv=T, data=rt2, time.inc=1)
+surv <- Survival(f)
+
+###5. 构建Nomogram
+nom2 <- nomogram(f, fun=list(function(x) surv(1, x), function(x) surv(2, x), function(x) surv(3, x)), 
+                 lp=F, funlabel=c("1-year survival", "2-year survival", "3-year survival"), 
+                 maxscale=100, 
+                 fun.at=c(0.99, 0.9, 0.8, 0.7, 0.6, 0.5, 0.4, 0.3,0.2,0.1,0.05))
+plot(nom2)
+dev.off()
+#评价预后模型的效果
+####Calibration plot####
+#1年
+f1 <- cph(Surv(futime, fustat) ~age + gender + stage + T + M + N + risk, x=T, y=T, surv=T, data=rt2, time.inc=1)
+cal1 <- calibrate(f1,cmethod="KM",method="boot",u=1,m=80,B=1000)
+plot(cal1,
+     xlab = "Predicted 1 Year Survival (%)",ylab = "Observed OS (%)")
+dev.off()
+#3年
+f3 <- cph(Surv(futime, fustat) ~age + gender + stage +T + M + N + risk, x=T, y=T, surv=T, data=rt2, time.inc=3)
+cal3 <- calibrate(f3,cmethod="KM",method="boot",u=3,m=80,B=1000)
+plot(cal3,
+     xlab = "Predicted 3 Year Survival (%)",ylab = "Observed OS (%)")
+dev.off()
+#5年
+f5 <- cph(Surv(futime, fustat) ~age + gender + stage +T + M + N + risk, x=T, y=T, surv=T, data=rt2, time.inc=5)
+cal5 <- calibrate(f5,cmethod="KM",method="boot",u=5,m=80,B=1000)
+plot(cal5,
+     xlab = "Predicted 5 Year Survival (%)",ylab = "Observed OS (%)")
+dev.off()
+
+####GEO验证####
+setwd("GSE84437")
+setwd("LASSO")
+#读取GEO表达谱
+rt <- read.table("tpms01A_log2.txt",sep = "\t",row.names = 1,check.names = F,stringsAsFactors = F,header = T)
+#右上角导入TCGA-STAD LASSO geneCoef
+rt <- as.data.frame(t(rt))
+FinalGeneExp = rt[,geneCoef$Gene]
+actCoef <- geneCoef$Coef
+myFun = function(x){crossprod(as.numeric(x),actCoef)}
+riskScore = apply(FinalGeneExp,1,myFun)
+risk = as.vector(ifelse(riskScore > median(riskScore), "high", "low"))
+dat = cbind(FinalGeneExp,riskScore=as.vector(riskScore), risk)
+#读取GEO生存信息
+surv_01A <- read.table("surv_01A.txt",sep = "\t",row.names = 1,check.names = F,stringsAsFactors = F,header = T)
+a <- intersect(rownames(dat),rownames(surv_01A))
+dat <- dat[a,]
+surv_01A <- surv_01A[a,]
+identical(rownames(dat),rownames(surv_01A))
+dat <- cbind(surv_01A,dat)
+colnames(dat)[1] <- "fustat"
+colnames(dat)[2] <- "futime"
+
+###5. 绘制散点分布图
+#install.packages("ggpubr")
+library(ggpubr)  
+p <- ggboxplot(dat, x = "fustat", y = "riskScore",
+               color = "fustat", palette = "jco",
+               add = "jitter")
+p <- p + stat_compare_means()   #  Add p-value
+p   #得出预测结果
+
+###6. ROC判断预测结果的准确性
+library(pROC)
+class(dat$fustat)
+dat$fustat <- as.character(dat$fustat)
+class(dat$fustat)
+dat$Type <- ifelse(str_detect(dat$fustat, "0"), "alive","dead")
+ROC1 <- roc(dat$Type, dat$riskScore,
+            levels = c("alive", "dead"))
+plot(ROC1,
+     add = FALSE,   #不添加至上一图层
+     col = 'red',   #设置曲线颜色
+     legacy.axes = TRUE,   #使x轴变为1-Specificity
+     xlab = "1-Specificity",
+     print.auc =TRUE,
+     print.auc.x = 0.5,   #输出auc值的x轴位置
+     print.auc.y = 0.5,   #输出auc值的y轴位置
+     auc.polygon = TRUE,   #将auc曲线下面积转换为多边形
+     auc.polygon.col = "#fff7f7",   #设置多边形的填充色
+     grid = c(0.5, 0.2),   #设置两轴网格线的间隔为0.5，0.2
+     grid.col = c("black", "black"),   #设置两轴网格线的颜色
+     print.thres = TRUE)
+
+#画风险分布图
+#y=生存时间
+rt <- dat
+color=as.vector(rt$fustat)
+color[color==1]="indianred1"
+color[color==0]="lightseagreen"
+plot(rt$futime, pch=19,
+     xlab="Patients (increasing risk socre)", ylab="Survival time (Days)",
+     col=color)
+legend("topleft", c("Dead", "Alive"),bty="n",pch=19,col=c("indianred1","lightseagreen"),cex=1.2)
+riskClass=rt[,"risk"]
+lowLength=length(riskClass[riskClass=="low"])
+highLength=length(riskClass[riskClass=="high"])
+abline(v=lowLength,lty=2)
+dev.off()
+
+#y=riskscore
+rt <- arrange(rt,riskScore)
+riskClass=rt[,"risk"]
+lowLength=length(riskClass[riskClass=="low"])
+highLength=length(riskClass[riskClass=="high"])
+line=rt[,"riskScore"]
+line[line>10]=10
+plot(line, type="p", pch=20,
+     xlab="Patients (increasing risk socre)", ylab="Risk score",
+     col=c(rep("lightseagreen",lowLength),rep("indianred1",highLength)) )
+abline(h=median(rt$riskScore),v=lowLength,lty=2)
+legend("topleft", c("High risk", "low Risk"),bty="n",pch=19,col=c("indianred1","lightseagreen"),cex=1.2)
+dev.off()
+
+####Class10####
+
+####P-C数据框整理####
+setwd("GSE131761")
+setwd("P-C")
+library(tidyverse)
+#右上角导入pdata1
+table(pdata1$group)
+a <- c(rep(1,81))
+b <- c(rep(2,15))
+c <- c(rep(2,81))
+d <- c(rep(1,15))
+e <- c(a,b)
+f <- c(c,d)
+P_C <- data.frame(sample=rownames(pdata1),
+                  P=e,
+                  C=f)
+P_C <- column_to_rownames(P_C,"sample")
+write.table(P_C,"P_C.txt",sep = "\t",row.names = T,col.names = NA,quote = F)
