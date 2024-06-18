@@ -1,0 +1,23 @@
+#以富集结果表Top20为例这个命名别动了：直接改后面的
+KEGG_top20 <- kk_res[1:10,]
+
+#指定绘图顺序（转换为因子）：
+KEGG_top20$pathway <- factor(KEGG_top20$Description, levels = rev(KEGG_top20$Description))
+
+#Top20富集数目条形图：
+mytheme <- theme(axis.title = element_text(size = 13),
+                 axis.text = element_text(size = 11),
+                 plot.title = element_text(size = 14, hjust = 0.5, face = "bold"),
+                 legend.title = element_text(size = 13),
+                 legend.text = element_text(size = 11)) #自定义主题
+
+p <- ggplot(data = KEGG_top20,
+            aes(x = Count, y = pathway, fill = -log10(pvalue)))+
+  geom_bar(stat = "identity", width = 0.8) +
+  scale_fill_distiller(palette = "RdPu",direction = 1) +
+  labs(x = "Number of Gene",
+       y = "pathway",
+       title = "KEGG enrichment barplot") +
+  theme_bw() +
+  mytheme
+p
