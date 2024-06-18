@@ -1,0 +1,5 @@
+# DESeq2 要求输入数据是由整数组成的矩阵，且没有经过标准化
+# 我们在Xena下载的数据是 log2(count+1)，所以需要进行处理
+exp_brca_int <- 2^(exp_brca) - 1
+exp_brca_int <- apply(exp_brca_int, 2, as.integer)
+rownames(exp_brca_int) <- rownames(exp_brca) 作者：洛洛的港港 https://www.bilibili.com/read/cv28430584/ 出处：bilibili
