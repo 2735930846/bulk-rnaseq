@@ -1,0 +1,115 @@
+#注意整理好成相应格式，确保最后一列是Label，肿瘤和正常组命名为0和1，进行二分类
+# 安装并加载必要的包
+# 如果没有安装这些包，请取消注释以下安装命令
+# install.packages("xgboost")
+# install.packages("caret")
+# install.packages("pROC")
+# install.packages("tibble")
+# install.packages("ROCit")
+# install.packages("ggplot2")
+# install.packages("shapviz")
+
+library(xgboost)
+library(caret)
+library(pROC)
+library(tibble)
+library(ROCit)
+library(ggplot2)
+library(shapviz)
+
+# 读取数据
+my_data <- read.csv("gene_expression_data.csv", row.names = 1, check.names = FALSE)
+
+# 查看数据结构
+str(my_data)
+
+# 确保最后一列是Label
+if (!("Label" %in% colnames(my_data))) {
+  stop("数据框中没有 'Label' 列，请检查数据。")
+}
+
+# 去除CLC和LTF特征（假设LTF在数据框中的列名为"LTF"）
+my_data <- my_data[, !colnames(my_data) %in% c("CLC", "LTF")]
+
+# 标准化特征数据（去除Label列）
+features <- my_data[, -ncol(my_data)]
+features <- scale(features)
+
+# 将标准化后的数据和Label列组合成新的数据框
+my_data_scaled <- data.frame(features, Label = my_data$Label)
+
+# 划分训练集和测试集
+set.seed(123)
+inTrain <- createDataPartition(y = my_data_scaled$Label, p = 0.7, list = FALSE)
+traindata <- my_data_scaled[inTrain, ]
+testdata <- my_data_scaled[-inTrain, ]
+
+# 特征名称
+feature_names <- colnames(traindata)[-ncol(traindata)]
+
+# 训练XGBoost模型（添加正则化参数）
+model_xgboost <- xgboost(
+  data = as.matrix(traindata[, feature_names]),
+  label = traindata$Label,
+  max_depth = 3,
+  eta = 0.1,          # 降低学习率
+  lambda = 1,         # L2 正则化
+  alpha = 0.5,        # L1 正则化
+  nthread = 2,
+  nrounds = 100,      # 增加迭代次数
+  objective = "binary:logistic"
+)
+
+# 生成训练集预测值并计算AUC
+traindata$pred <- predict(model_xgboost, as.matrix(traindata[, feature_names]))
+ROC_train <- round(auc(response = traindata$Label, predictor = traindata$pred), 4)
+print(paste("Train AUC:", ROC_train))
+
+# 计算和可视化SHAP值
+shap_xgboost <- shapviz(model_xgboost, X_pred = as.matrix(traindata[, feature_names]))
+
+importance_plot <- sv_importance(shap_xgboost) +
+  theme_minimal() +
+  ggtitle("Feature Importance") +
+  xlab("Mean Absolute SHAP Value") +
+  ylab("Feature") +
+  theme(plot.title = element_text(hjust = 0.5, size = 16, face = "bold"),
+        axis.title = element_text(size = 14),
+        axis.text = element_text(size = 12),
+        panel.grid.major.y = element_blank(),
+        panel.border = element_blank(),
+        axis.line = element_line(colour = "black"))
+
+print(importance_plot)
+
+sv_importance(shap_xgboost, kind = "beeswarm")
+sv_waterfall(shap_xgboost, row_id = 1)
+sv_force(shap_xgboost, row_id = 1)
+
+# 在测试集上生成预测值并计算性能指标
+testdata$pred <- predict(model_xgboost, as.matrix(testdata[, feature_names]))
+
+# 计算测试集AUC
+ROC_test <- round(auc(response = testdata$Label, predictor = testdata$pred), 4)
+print(paste("Test AUC:", ROC_test))
+
+# 绘制ROC曲线
+roc_obj <- roc(testdata$Label, testdata$pred)
+plot(roc_obj, main = "ROC Curve", xlab = "False Positive Rate", ylab = "True Positive Rate")
+abline(a = 0, b = 1, lty = 2, col = "gray")
+
+# 创建混淆矩阵并计算性能指标
+predicted_classes <- ifelse(testdata$pred > 0.5, 1, 0)
+confusion_matrix <- confusionMatrix(as.factor(predicted_classes), as.factor(testdata$Label))
+print(confusion_matrix)
+
+# 提取准确率、召回率、特异性和F1分数
+accuracy <- confusion_matrix$overall["Accuracy"]
+recall <- confusion_matrix$byClass["Recall"]
+specificity <- confusion_matrix$byClass["Specificity"]
+f1 <- confusion_matrix$byClass["F1"]
+
+cat("准确率:", accuracy, "\n")
+cat("召回率:", recall, "\n")
+cat("特异性:", specificity, "\n")
+cat("F1分数:", f1, "\n")
