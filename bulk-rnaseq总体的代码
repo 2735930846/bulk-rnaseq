@@ -1,3 +1,146 @@
+####Class1####
+####R基础####
+#如何打开四个板块
+#换个喜欢的颜色
+#运行1+1试试 R语言其实很简单
+1+1  #
+#1个#是什么意思 4个#是什么意思
+
+#R页面布局 四个板块 分别是什么功能
+#左上板块用于写代码 运用左上板块养成良好写代码习惯
+#左下板块是用于代码运行 但永远不要在左下角写代码！
+#右上角用于查看当前环境的文件 还有运行历史（这个一般用不到）
+#右下角用于安装包、画图
+
+#什么是包呢、安装包的两种方式 加载包 每次进Rstudio都要重新加载包才可以使用
+#install.packages("tidyverse")#安装
+library(tidyverse)#加载
+#如何让R包下载更快
+
+#R镜像 快速选择
+chooseBioCmirror() #这样下载会更快
+
+#R赋值 两种符号 = <- 那==是什么呢 <- 
+a=5
+a+1
+a <- 6
+a+1
+5==5
+5==6
+
+#R文件夹
+#设置工作目录 如何查看当前文件夹呢 同级别文件夹无法跳跃
+setwd("Day1")
+setwd("Day2")
+setwd("Day1.1")
+setwd("Day1")
+#往上跳
+setwd("..")
+#中英文符号 常见的错误
+setwd（"Day1.1"）
+setwd(‘Day1.1’)
+#注意到红色波浪线和红叉了吗
+setwd("Day1.1")
+
+#R快捷键 查找F 保存S 撤回Z
+#读取数据 代码及手动 rda csv txt等数据格式 代码只能读取当前文件夹的数据
+#读取txt
+c <- read.table("x.txt",sep = "\t",row.names = 1,check.names = F,stringsAsFactors = F,header = T)
+d <- read.table("b.txt",sep = "\t",row.names = 1,check.names = F,stringsAsFactors = F,header = T)
+#复制1份c重新取名
+a <- c
+#输出txt
+write.table(a,"b.txt",sep = "\t",row.names = T,col.names = NA,quote = F)
+write.table(d,"d.txt",sep = "\t",row.names = T,col.names = NA,quote = F)
+#输出csv
+write.csv(a, file = "a.csv")
+#可以改文件名
+write.csv(a, file = "b.csv")
+#读取csv
+x <- read.csv("a.csv", row.names=1)
+#右上角也可以读取数据
+
+#数据框行列反转
+x <- t(x) 
+#as.data.frame
+x <- as.data.frame(x)
+
+#三种数据类型 数字 字符 数据框
+
+#class 判断数据类型
+class(x)
+#美元符号$是什么意思
+class(a$`TCGA-55-6971-11A`)
+
+#substr 提取
+"abc"
+substr("shengxin",2,5)
+substr("shengxin",1,4)
+substr("shengxin",2)
+substring("shengxin",2)
+
+#c() 创建集合
+jihe <- c("a","b","c","d","e")
+jihe
+class(jihe)
+
+#提取/删除数据框行列
+j <- x[1,]
+k <- x[,1]
+q = x[,1:3]#1-3列 :
+p = x[1:3,]
+r = x[1:3,5:6]
+s = x[-1,]
+t = x[,-1]
+u = x[,-(2:4)]
+v <- x[,-c(1,3)] 
+
+#运用管道符%>%
+x <- t(x)
+x <- as.data.frame(x)
+
+
+x <- as.data.frame(t(x))
+
+x <- x %>% t() %>% as.data.frame()
+
+#duplicated函数
+a <- c("a","b","a","b","c")
+duplicated(a)#判断是否重复
+
+!duplicated(a)
+
+a <- a[!duplicated(a)]#只能提取true
+a
+
+#inner_join
+#tribble创建简易数据框
+class1 <- tribble(
+  ~'名次',~'姓名',
+  '第一名','王某人',
+  '第二名','张周人',
+  '第三名','李某人'
+)
+
+class2<-tribble(
+  ~'名次',~'姓名',
+  '第一名','胡某人',
+  '第二名','刘周人',
+  '第四名','于某人'
+)
+
+class3<-tribble(
+  ~'名次',~'姓名',~'哈哈',
+  '第一名','胡某人',
+  '第二名','刘周人',
+  '第四名','于某人'
+)
+
+class1
+class2
+inner_join(class1,class2,by='名次')
+
+####Class2####
 ####TCGA-STAD 数据下载####
 setwd('TCGA-STAD')
 setwd("TCGAdata")
@@ -63,9 +206,9 @@ colnames(counts) <- substring(colnames(counts),1,16)
 counts <- counts[,!duplicated(colnames(counts))]
 table(substring(colnames(counts),14,16))
 # 保留01A  （注：可通过table(substring(colnames(counts),14,16))查看样本类型）
-counts01A <- counts[,substring(colnames(counts),1,1) == "K"]
+counts01A <- counts[,substring(colnames(counts),14,16) == "01A"]
 # 保留11A
-counts11A <- counts[,substring(colnames(counts),1,1) == c("T")]
+counts11A <- counts[,substring(colnames(counts),14,16) == c("11A")]
 table(substring(colnames(counts01A),14,16))
 table(substring(colnames(counts11A),14,16))
 
@@ -88,9 +231,9 @@ tpms <- tpms[,-c(1,ncol(tpms))]
 colnames(tpms) <- substring(colnames(tpms),1,16)
 tpms <- tpms[,!duplicated(colnames(tpms))]
 # 保留01A  （注：可通过table(substring(colnames(tpms),14,16))查看样本类型）
-tpms01A <- tpms[,substring(colnames(tpms),1,1) == c("K")]
+tpms01A <- tpms[,substring(colnames(tpms),14,16) == c("01A")]
 # 保留11A
-tpms11A <- tpms[,substring(colnames(tpms),1,1) == c("T")]
+tpms11A <- tpms[,substring(colnames(tpms),14,16) == c("11A")]
 
 #判断counts和tpms的行列名是否一致
 #identical的用法
@@ -121,23 +264,19 @@ range(tpms01A_log2)
 tpms11A_log2 <- log2(tpms11A+1)
 range(tpms11A_log2)
 #保存counts和tpms数据
-a <- rownames(counts)
-all_counts <- all_counts[a,]
-all_FPKM <- all_FPKM[a,]
-all_counts <- na.omit(all_FPKM)
 write.table(counts01A,"counts01A.txt",sep = "\t",row.names = T,col.names = NA,quote = F)
 write.table(counts11A,"counts11A.txt",sep = "\t",row.names = T,col.names = NA,quote = F)
-write.table(all_counts,"counts.txt",sep = "\t",row.names = T,col.names = NA,quote = F)
-write.table(all_counts,"tpms_log2.txt",sep = "\t",row.names = T,col.names = NA,quote = F)
-write.table(tpms01A,"tpms01A_log2.txt",sep = "\t",row.names = T,col.names = NA,quote = F)
-write.table(tpms11A,"tpms11A_log2.txt",sep = "\t",row.names = T,col.names = NA,quote = F)
+write.table(counts,"counts.txt",sep = "\t",row.names = T,col.names = NA,quote = F)
+write.table(tpms_log2,"tpms_log2.txt",sep = "\t",row.names = T,col.names = NA,quote = F)
+write.table(tpms01A_log2,"tpms01A_log2.txt",sep = "\t",row.names = T,col.names = NA,quote = F)
+write.table(tpms11A_log2,"tpms11A_log2.txt",sep = "\t",row.names = T,col.names = NA,quote = F)
 
 ####TCGA T/N差异分析####
 #设置工作目录
 setwd("TCGA-STAD")
 setwd("T_N_DEG")
 ##读取文本文件
-counts1 <- read.table("counts1.txt",sep = "\t",row.names = 1,check.names = F,stringsAsFactors = F,header = T)
+counts <- read.table("counts.txt",sep = "\t",row.names = 1,check.names = F,stringsAsFactors = F,header = T)
 #差异分析
 library(tidyverse)
 #安装BiocManager
@@ -148,7 +287,7 @@ library(DESeq2)
 counts = counts[apply(counts, 1, function(x) sum(x > 1) > 32), ]
 #设置分组信息
 conditions=data.frame(sample=colnames(counts),
-                      group=factor(ifelse(substr(colnames(counts),1,1) == "K","T","N"),levels = c("N","T"))) %>% 
+                      group=factor(ifelse(substr(colnames(counts),14,16) == "01A","T","N"),levels = c("N","T"))) %>% 
   column_to_rownames("sample")
 
 #data.frame创建数据框
@@ -156,7 +295,7 @@ x <- data.frame(name=c("zhang","li","wu"),
                 rank=c("1","2","3")
 )
 
-factor(ifelse(substr(colnames(counts),1,1) == "K","T","N"),levels = c("N","T"))#因子
+factor(ifelse(substr(colnames(counts),14,16) == "01A","T","N"),levels = c("N","T"))#因子
 
 
 
@@ -215,7 +354,7 @@ identical(cg,d)
 exp_diff <- exp[d,]
 
 #设置分组信息
-group_list=factor(ifelse(substr(colnames(exp),1,1) == "T","T","N"),levels = c("N","T"))
+group_list=factor(ifelse(substr(colnames(exp),14,16) == "01A","T","N"),levels = c("N","T"))
 annotation_col=data.frame(group=group_list)
 rownames(annotation_col)=colnames(exp_diff)
 
@@ -249,8 +388,8 @@ pheatmap(exp_diff,
          show_rownames = F,
          show_colnames =F,
          color = colorRampPalette(c(rep("royalblue",4),"white",rep("firebrick3",4)))(50),
-         cluster_cols =T,
-         cluster_rows = T,
+         cluster_cols =F,
+         cluster_rows = F,
          fontsize = 10,
          fontsize_row=3,
          fontsize_col=3)
@@ -302,8 +441,7 @@ ggscatter(DEG, x = "log2FoldChange", y = "logP", xlab = "log2FoldChange",
           size = 1) +
   theme_base() +
   geom_hline(yintercept = -log10(0.05), linetype = "dashed") +
-  geom_vline(xintercept = c(-1, 1), linetype = "dashed") +
-  scale_x_continuous(limits = c(-8, 8), breaks = seq(-8, 8, by = 2)) 
+  geom_vline(xintercept = c(-1, 1), linetype = "dashed")
 dev.off()
 
 ##如何添加特定基因标签
@@ -515,12 +653,12 @@ dev.off()
 
 ####富集分析（用CDKN3的差异基因做）####
 ####GO####
-setwd("TCGA-LAML")
-setwd("go")
+setwd("TCGA-STAD")
+setwd("FUJI_CDKN3_DEG")
 library(tidyverse)
 library("BiocManager")
 #安装加载包
-#chooseBioCmirror()
+chooseBioCmirror()
 #BiocManager::install('clusterProfiler')
 #BiocManager::install('org.Hs.eg.db')
 library(org.Hs.eg.db)
@@ -659,7 +797,7 @@ DEG <- na.omit(DEG)
 DEG <- DEG %>% rownames_to_column("Gene")
 
 msigdb_GMTs <- "msigdb_v7.0_GMTs"
-msigdb <- "c2.cp.kegg.v7.0.symbols.gmt"  
+msigdb <- "h.all.v7.0.symbols.gmt"  
 #读取上面指定的gmt文件
 kegmt <- read.gmt(file.path(msigdb_GMTs,msigdb))
 
@@ -681,7 +819,7 @@ library(enrichplot)
 gseaplot2(gsea,3,color="red",pvalue_table = T)
 #多个结果绘制
 gseaplot2(gsea, geneSetID = c(1,3), subplots = 1:3)
-gseaplot2(gsea, geneSetID = 1:6, subplots = 1:2)
+gseaplot2(gsea, geneSetID = 1:10, subplots = 1:3)
 
 dev.off()
 #GSEA原理
@@ -1424,7 +1562,7 @@ clinical <- as.data.frame(expquery2@colData) %>%
   .[!duplicated(.$sample),]
 #提取需要的临床信息数据
 clinical <- clinical[,c("gender","age_at_index","ajcc_pathologic_stage",
-                        "ajcc_pathologic_t","ajcc_pathologic_n","ajcc_pathologic_m")]
+                       "ajcc_pathologic_t","ajcc_pathologic_n","ajcc_pathologic_m")]
 
 class(clinical$gender)
 class(clinical$age_at_index)
@@ -2444,8 +2582,8 @@ setwd("WGCNA")
 DEG <- as.data.frame(res)%>% 
   arrange(padj) %>% 
   dplyr::filter(abs(log2FoldChange) > 2, padj < 0.05)#根据自己需要
-exp <- read.table("tpms_log2.txt", sep = "\t",row.names = 1,check.names = F,header = T)
-input <- exp
+exp <- read.table("tpms01A_log2.txt", sep = "\t",row.names = 1,check.names = F,header = T)
+input <- exp[rownames(DEG),]
 
 #保证样本在行，基因在列 很重要！！！！
 datExpr0 = as.data.frame(t(input)) 
@@ -3943,7 +4081,7 @@ d <- c(rep(1,15))
 e <- c(a,b)
 f <- c(c,d)
 P_C <- data.frame(sample=rownames(pdata1),
-                  P=e,
-                  C=f)
+                 P=e,
+                 C=f)
 P_C <- column_to_rownames(P_C,"sample")
 write.table(P_C,"P_C.txt",sep = "\t",row.names = T,col.names = NA,quote = F)
