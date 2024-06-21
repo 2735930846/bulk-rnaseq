@@ -1,0 +1,39 @@
+# 清空当前工作空间中的所有对象
+rm(list = ls())
+
+# 读取临床数据文件，文件名为"TCGA.BRCA.sampleMap_BRCA_clinicalMatrix"
+pd = read.delim("TCGA.BRCA.sampleMap_BRCA_clinicalMatrix")
+
+# 输出数据框pd的维度（行数和列数）
+dim(pd)
+
+# 创建一个数据框tmp，包含pd数据框的列名
+tmp = data.frame(colnames(pd))
+
+# 从pd数据框中提取特定的三列，并存储在pd2数据框中
+pd2 = pd[,c("ER_Status_nature2012",
+            "PR_Status_nature2012",
+            "HER2_Final_Status_nature2012")]
+
+# 将pd2数据框的行名设置为pd数据框中的sampleID列的值
+rownames(pd2) = pd$sampleID
+
+# 显示pd2数据框的前几行（默认前六行）
+head(pd2)
+
+# 对pd2数据框的每一行应用函数，检查每一行的所有元素是否都是"Negative"
+k = apply(pd2, 1, function(x){
+  all(x == "Negative")
+})
+
+# 显示向量k中TRUE和FALSE值的频数表
+table(k)
+
+# 筛选出pd2数据框中所有元素都为"Negative"的行，结果重新赋值给pd2
+pd2 = pd2[k,]
+
+# 显示筛选后的pd2数据框的行名（即样本ID）的前几行（默认前六行）
+head(rownames(pd2))
+
+# 将pd2数据框的行名保存为txt文件，命名为sanyinxing.txt.注意这里可没有正常样本呦，整理TCGA时别忘记了。
+write.table(rownames(pd2), file = "sanyinxing.txt", quote = FALSE, row.names = FALSE, col.names = FALSE)
