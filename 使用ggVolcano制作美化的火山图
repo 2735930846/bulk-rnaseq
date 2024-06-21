@@ -1,0 +1,69 @@
+需要手动导入差异基因的rda文件，如果你是根据我的summary代码跑的，那这里不用改任何参数，否则可能要微调一些名称代词
+# 安装和加载必要的包
+# install.packages("devtools")
+#devtools::install_github("BioSenior/ggvolcano")
+library(ggVolcano)
+library(RColorBrewer)
+library(ggsci)
+library(patchwork)
+library(tidyverse)
+
+# 设置工作目录
+setwd('TCGA-STAD/T_N_DEG')
+
+# 读取表达数据
+exp <- read.table("tpms_log2.txt", sep = "\t", row.names = 1, check.names = F, stringsAsFactors = F, header = T)
+
+# 读取差异分析结果
+load("STAD-DEG.rda")
+DEG <- as.data.frame(res) %>% arrange(padj)
+
+# 添加GeneName列
+DEG <- DEG %>%
+  rownames_to_column(var = "GeneName")
+
+# 设置logFC和p值的阈值
+logFC_cutoff <- 1
+DEG <- DEG %>%
+  mutate(change = case_when(
+    padj < 0.05 & log2FoldChange < -logFC_cutoff ~ "DOWN",
+    padj < 0.05 & log2FoldChange > logFC_cutoff ~ "UP",
+    TRUE ~ "NOT"
+  )) %>%
+  na.omit()
+
+# 打印上下调基因数量
+table(DEG$change)
+
+# 计算-log10(padj)
+DEG$logP <- -log10(DEG$padj)
+# 基础火山图并设置横坐标范围
+p1 <- gradual_volcano(DEG, x = "log2FoldChange", y = "padj",
+                      label = "GeneName", label_number = 10, output = FALSE) +
+  scale_x_continuous(limits = c(-10, 10), breaks = seq(-10, 10, by = 2))
+# 手动更改填充和颜色，并设置横坐标范围
+p2 <- gradual_volcano(DEG, x = "log2FoldChange", y = "padj",
+                      fills = brewer.pal(5, "RdYlBu"),
+                      colors = brewer.pal(8, "RdYlBu"),
+                      label = "GeneName", label_number = 10, output = FALSE) +
+  scale_x_continuous(limits = c(-10, 10), breaks = seq(-10, 10, by = 2))
+
+# 使用ggsci更改颜色和填充，并设置横坐标范围
+p3 <- gradual_volcano(DEG, x = "log2FoldChange", y = "padj",
+                      label = "GeneName", label_number = 10, output = FALSE) +
+  ggsci::scale_color_gsea() +
+  ggsci::scale_fill_gsea() +
+  scale_x_continuous(limits = c(-10, 10), breaks = seq(-10, 10, by = 2))
+# 并排显示图形
+p_combined <- p2 | p3
+print(p_combined)
+# 调整点的大小范围并设置横坐标范围
+p4 <- gradual_volcano(DEG, x = "log2FoldChange", y = "padj",
+                      fills = brewer.pal(5, "RdYlBu"),
+                      colors = brewer.pal(8, "RdYlBu"),
+                      pointSizeRange = c(1, 5),
+                      label = "GeneName", label_number = 0, output = FALSE) +
+  scale_x_continuous(limits = c(-10, 10), breaks = seq(-10, 10, by = 2))
+
+# 显示调整后点大小范围的图形
+print(p4)
