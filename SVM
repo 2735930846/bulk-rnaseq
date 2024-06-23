@@ -1,8 +1,3 @@
-# 安装并加载必要的包
-# 如果没有安装这些包，请取消注释以下安装命令
-# install.packages("e1071")
-# install.packages("pROC")
-
 library(xgboost)
 library(caret)
 library(pROC)
