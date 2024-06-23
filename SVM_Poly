@@ -1,0 +1,86 @@
+library(xgboost)
+library(caret)
+library(pROC)
+library(tibble)
+library(ROCit)
+library(ggplot2)
+library(shapviz)
+library(e1071)
+
+# 读取并准备数据
+tpms_transposed <- read.table("MachineLearning.txt", sep = "\t", row.names = 1, check.names = FALSE, stringsAsFactors = FALSE, header = TRUE)
+tpms_transposed <- tpms_transposed[, c("CDKN1C", "ADRA1A", "BCL2A1", "DPP4", "CACNA1B", "TFPI", "KCNA5", "CYB5A", "Label")]
+
+# 读取数据
+my_data <- tpms_transposed
+
+# 查看数据结构
+str(my_data)
+
+# 确保最后一列是Label
+if (!("Label" %in% colnames(my_data))) {
+  stop("数据框中没有 'Label' 列，请检查数据。")
+}
+
+# 标准化特征数据（去除Label列）
+features <- my_data[, -ncol(my_data)]
+features <- scale(features)
+
+# 将标准化后的数据和Label列组合成新的数据框
+my_data_scaled <- data.frame(features, Label = my_data$Label)
+
+# 划分训练集和测试集
+set.seed(123)
+inTrain <- createDataPartition(y = my_data_scaled$Label, p = 0.6, list = FALSE)
+traindata <- my_data_scaled[inTrain, ]
+testdata <- my_data_scaled[-inTrain, ]
+
+# 特征名称
+feature_names <- colnames(traindata)[-ncol(traindata)]
+
+# 使用SVM的多项式内核进行分类
+# 创建训练模型
+model_svm_poly <- svm(Label ~ ., data = traindata, kernel = "polynomial", degree = 3, cost = 1, scale = FALSE)
+
+# 生成训练集预测值
+traindata$pred_svm_poly <- predict(model_svm_poly, traindata[, feature_names])
+
+# 计算训练集AUC
+ROC_train_svm_poly <- round(auc(response = traindata$Label, predictor = traindata$pred_svm_poly), 4)
+print(paste("Train AUC (SVM - Polynomial):", ROC_train_svm_poly))
+
+# 在测试集上生成预测值
+testdata$pred_svm_poly <- predict(model_svm_poly, testdata[, feature_names])
+
+# 计算测试集AUC
+ROC_test_svm_poly <- round(auc(response = testdata$Label, predictor = testdata$pred_svm_poly), 4)
+print(paste("Test AUC (SVM - Polynomial):", ROC_test_svm_poly))
+
+# 创建混淆矩阵并计算性能指标
+predicted_classes_svm_poly <- ifelse(testdata$pred_svm_poly > 0.5, 1, 0)
+confusion_matrix_svm_poly <- confusionMatrix(as.factor(predicted_classes_svm_poly), as.factor(testdata$Label))
+print(confusion_matrix_svm_poly)
+
+# 提取准确率、召回率、特异性和F1分数
+accuracy_svm_poly <- confusion_matrix_svm_poly$overall["Accuracy"]
+recall_svm_poly <- confusion_matrix_svm_poly$byClass["Recall"]
+specificity_svm_poly <- confusion_matrix_svm_poly$byClass["Specificity"]
+f1_svm_poly <- confusion_matrix_svm_poly$byClass["F1"]
+
+cat("准确率 (SVM - Polynomial):", accuracy_svm_poly, "\n")
+cat("召回率 (SVM - Polynomial):", recall_svm_poly, "\n")
+cat("特异性 (SVM - Polynomial):", specificity_svm_poly, "\n")
+cat("F1分数 (SVM - Polynomial):", f1_svm_poly, "\n")
+
+# 保存SVM - Polynomial的预测结果和实际值到CSV文件
+write.csv(data.frame(Label = testdata$Label, Predicted = testdata$pred_svm_poly), "svm_poly_predictions.csv", row.names = FALSE)
+
+# 绘制SVM - Polynomial的ROC曲线
+roc_obj_svm_poly <- roc(testdata$Label, testdata$pred_svm_poly)
+plot(roc_obj_svm_poly, main = "ROC Curve for SVM (Polynomial Kernel)", xlab = "False Positive Rate", ylab = "True Positive Rate", col = "blue", lwd = 2)
+abline(a = 0, b = 1, lty = 2, col = "gray")
+
+# 添加AUC值到图中
+auc_value_svm_poly <- auc(roc_obj_svm_poly)
+legend("bottomright", legend = paste("AUC =", round(auc_value_svm_poly, 4)), col = "blue", lwd = 2)
+
