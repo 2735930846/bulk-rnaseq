@@ -17,8 +17,33 @@ library(ROCit)
 library(ggplot2)
 library(shapviz)
 
+# 假设你已经导入了数据框 tpms_log2
+
+# 1. 转置数据框
+tpms_transposed <- t(tpms_log2)
+
+# 2. 将转置后的数据框转换为数据框格式
+tpms_transposed <- as.data.frame(tpms_transposed)
+
+column_names <- c("CDKN1C","ADRA1A","BCL2A1","DPP4", "CACNA1B", "TFPI", "KCNA5", "CYB5A")
+#整理LASSO输入数据，这里就无缝衔接原代码就好了
+tpms_transposed <-tpms_transposed[,column_names]
+write.table(tpms_transposed,"Machine Learning.txt",sep = "\t",row.names = T,col.names = NA,quote = F)
+
+
+# 3. 新增列 Label 并根据条件赋值
+tpms_transposed$Label <- ifelse(substr(rownames(tpms_transposed), 14, 16) == "01A", 1, 0)
+
+# 现在 tpms_transposed 数据框中就包含了转置后的数据，并且有 Label 列根据条件赋值。
+table(tpms_transposed$Label)
+
+#这里我直接导入了我之前搞好的数据，如果没搞好就用之前的
+tpms_transposed <- read.table("MachineLearning.txt", sep = "\t", row.names = 1, check.names = FALSE, stringsAsFactors = FALSE, header = TRUE)
+tpms_transposed <- tpms_transposed[,c("CDKN1C","ADRA1A","BCL2A1","DPP4", "CACNA1B", "TFPI", "KCNA5", "CYB5A","Label")]
+
+
 # 读取数据
-my_data <- read.csv("gene_expression_data.csv", row.names = 1, check.names = FALSE)
+my_data <- tpms_transposed
 
 # 查看数据结构
 str(my_data)
@@ -28,8 +53,6 @@ if (!("Label" %in% colnames(my_data))) {
   stop("数据框中没有 'Label' 列，请检查数据。")
 }
 
-# 去除CLC和LTF特征（假设LTF在数据框中的列名为"LTF"）
-my_data <- my_data[, !colnames(my_data) %in% c("CLC", "LTF")]
 
 # 标准化特征数据（去除Label列）
 features <- my_data[, -ncol(my_data)]
@@ -40,7 +63,7 @@ my_data_scaled <- data.frame(features, Label = my_data$Label)
 
 # 划分训练集和测试集
 set.seed(123)
-inTrain <- createDataPartition(y = my_data_scaled$Label, p = 0.7, list = FALSE)
+inTrain <- createDataPartition(y = my_data_scaled$Label, p = 0.6, list = FALSE)
 traindata <- my_data_scaled[inTrain, ]
 testdata <- my_data_scaled[-inTrain, ]
 
@@ -113,3 +136,4 @@ cat("准确率:", accuracy, "\n")
 cat("召回率:", recall, "\n")
 cat("特异性:", specificity, "\n")
 cat("F1分数:", f1, "\n")
+
