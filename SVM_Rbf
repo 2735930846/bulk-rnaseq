@@ -1,0 +1,91 @@
+# 安装并加载必要的包
+# 如果没有安装这些包，请取消注释以下安装命令
+# install.packages("e1071")
+# install.packages("pROC")
+
+library(xgboost)
+library(caret)
+library(pROC)
+library(tibble)
+library(ROCit)
+library(ggplot2)
+library(shapviz)
+library(e1071)
+
+# 读取并准备数据
+tpms_transposed <- read.table("MachineLearning.txt", sep = "\t", row.names = 1, check.names = FALSE, stringsAsFactors = FALSE, header = TRUE)
+tpms_transposed <- tpms_transposed[, c("CDKN1C", "ADRA1A", "BCL2A1", "DPP4", "CACNA1B", "TFPI", "KCNA5", "CYB5A", "Label")]
+
+# 读取数据
+my_data <- tpms_transposed
+
+# 查看数据结构
+str(my_data)
+
+# 确保最后一列是Label
+if (!("Label" %in% colnames(my_data))) {
+  stop("数据框中没有 'Label' 列，请检查数据。")
+}
+
+# 标准化特征数据（去除Label列）
+features <- my_data[, -ncol(my_data)]
+features <- scale(features)
+
+# 将标准化后的数据和Label列组合成新的数据框
+my_data_scaled <- data.frame(features, Label = my_data$Label)
+
+# 划分训练集和测试集
+set.seed(123)
+inTrain <- createDataPartition(y = my_data_scaled$Label, p = 0.6, list = FALSE)
+traindata <- my_data_scaled[inTrain, ]
+testdata <- my_data_scaled[-inTrain, ]
+
+# 特征名称
+feature_names <- colnames(traindata)[-ncol(traindata)]
+
+# 使用线性SVM进行分类
+# 使用 SVM 的 RBF 内核进行分类
+# 创建训练模型
+model_svm_rbf <- svm(Label ~ ., data = traindata, kernel = "radial", cost = 1, scale = FALSE)
+
+# 生成训练集预测值
+traindata$pred_svm_rbf <- predict(model_svm_rbf, traindata[, feature_names])
+
+# 计算训练集AUC
+ROC_train_svm_rbf <- round(auc(response = traindata$Label, predictor = traindata$pred_svm_rbf), 4)
+print(paste("Train AUC (SVM - RBF):", ROC_train_svm_rbf))
+
+# 在测试集上生成预测值
+testdata$pred_svm_rbf <- predict(model_svm_rbf, testdata[, feature_names])
+
+# 计算测试集AUC
+ROC_test_svm_rbf <- round(auc(response = testdata$Label, predictor = testdata$pred_svm_rbf), 4)
+print(paste("Test AUC (SVM - RBF):", ROC_test_svm_rbf))
+
+# 创建混淆矩阵并计算性能指标
+predicted_classes_svm_rbf <- ifelse(testdata$pred_svm_rbf > 0.5, 1, 0)
+confusion_matrix_svm_rbf <- confusionMatrix(as.factor(predicted_classes_svm_rbf), as.factor(testdata$Label))
+print(confusion_matrix_svm_rbf)
+
+# 提取准确率、召回率、特异性和F1分数
+accuracy_svm_rbf <- confusion_matrix_svm_rbf$overall["Accuracy"]
+recall_svm_rbf <- confusion_matrix_svm_rbf$byClass["Recall"]
+specificity_svm_rbf <- confusion_matrix_svm_rbf$byClass["Specificity"]
+f1_svm_rbf <- confusion_matrix_svm_rbf$byClass["F1"]
+
+cat("准确率 (SVM - RBF):", accuracy_svm_rbf, "\n")
+cat("召回率 (SVM - RBF):", recall_svm_rbf, "\n")
+cat("特异性 (SVM - RBF):", specificity_svm_rbf, "\n")
+cat("F1分数 (SVM - RBF):", f1_svm_rbf, "\n")
+
+# 保存 SVM - RBF 的预测结果和实际值到 CSV 文件
+write.csv(data.frame(Label = testdata$Label, Predicted = testdata$pred_svm_rbf), "svm_rbf_predictions.csv", row.names = FALSE)
+
+# 绘制 SVM - RBF 的 ROC 曲线
+roc_obj_svm_rbf <- roc(testdata$Label, testdata$pred_svm_rbf)
+plot(roc_obj_svm_rbf, main = "ROC Curve for SVM (RBF Kernel)", xlab = "False Positive Rate", ylab = "True Positive Rate", col = "blue", lwd = 2)
+abline(a = 0, b = 1, lty = 2, col = "gray")
+
+# 添加 AUC 值到图中
+auc_value_svm_rbf <- auc(roc_obj_svm_rbf)
+legend("bottomright", legend = paste("AUC =", round(auc_value_svm_rbf, 4)), col = "blue", lwd = 2)
