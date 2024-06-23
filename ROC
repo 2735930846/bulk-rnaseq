@@ -1,0 +1,111 @@
+# 安装并加载必要的包
+# 如果没有安装这些包，请取消注释以下安装命令
+# install.packages("pROC")
+# install.packages("ggplot2")
+# install.packages("RColorBrewer")
+library(pROC)
+library(ggplot2)
+library(RColorBrewer)
+
+# 读取所有预测结果文件
+dt_gini_predictions <- read.csv("decisiontree_gini_predictions.csv")
+lgbm_dart_predictions <- read.csv("lgbm_dart_predictions.csv")
+lgbm_gbdt_predictions <- read.csv("lgbm_gbdt_predictions.csv")
+rf_predictions <- read.csv("randomforest_predictions.csv")
+svm_linear_predictions <- read.csv("SVM_Linear _predictions.csv")
+svm_poly_predictions <- read.csv("svm_poly_predictions.csv")
+svm_rbf_predictions <- read.csv("svm_rbf_predictions.csv")
+xgb_predictions <- read.csv("xgb_predictions.csv")
+xgboost_predictions_1 <- read.csv("xgboost_predictions.csv")
+xgboost_predictions_2 <- read.csv("xgboost_predictions-5.csv")
+adaboost_predictions <- read.csv("adaboost_predictions.csv")
+dt_entropy_predictions <- read.csv("decisiontree_entropy_predictions.csv")
+
+# 检查并处理预测值中的负值
+clean_data <- function(data) {
+  data <- na.omit(data)  # 移除缺失值
+  data <- data[data$Predicted >= 0 & data$Predicted <= 1, ]  # 保留0到1之间的值
+  return(data)
+}
+
+# 清理每个数据框
+dt_gini_predictions <- clean_data(dt_gini_predictions)
+lgbm_dart_predictions <- clean_data(lgbm_dart_predictions)
+lgbm_gbdt_predictions <- clean_data(lgbm_gbdt_predictions)
+rf_predictions <- clean_data(rf_predictions)
+svm_linear_predictions <- clean_data(svm_linear_predictions)
+svm_poly_predictions <- clean_data(svm_poly_predictions)
+svm_rbf_predictions <- clean_data(svm_rbf_predictions)
+xgb_predictions <- clean_data(xgb_predictions)
+xgboost_predictions_1 <- clean_data(xgboost_predictions_1)
+xgboost_predictions_2 <- clean_data(xgboost_predictions_2)
+adaboost_predictions <- clean_data(adaboost_predictions)
+dt_entropy_predictions <- clean_data(dt_entropy_predictions)
+
+# 绘制 ROC 曲线
+roc_dt_gini <- roc(dt_gini_predictions$Label, dt_gini_predictions$Predicted)
+roc_lgbm_dart <- roc(lgbm_dart_predictions$Label, lgbm_dart_predictions$Predicted)
+roc_lgbm_gbdt <- roc(lgbm_gbdt_predictions$Label, lgbm_gbdt_predictions$Predicted)
+roc_rf <- roc(rf_predictions$Label, rf_predictions$Predicted)
+roc_svm_linear <- roc(svm_linear_predictions$Label, svm_linear_predictions$Predicted)
+roc_svm_poly <- roc(svm_poly_predictions$Label, svm_poly_predictions$Predicted)
+roc_svm_rbf <- roc(svm_rbf_predictions$Label, svm_rbf_predictions$Predicted)
+roc_xgb <- roc(xgb_predictions$Label, xgb_predictions$Predicted)
+roc_xgboost_1 <- roc(xgboost_predictions_1$Label, xgboost_predictions_1$Predicted)
+roc_xgboost_2 <- roc(xgboost_predictions_2$Label, xgboost_predictions_2$Predicted)
+roc_adaboost <- roc(adaboost_predictions$Label, adaboost_predictions$Predicted)
+roc_dt_entropy <- roc(dt_entropy_predictions$Label, dt_entropy_predictions$Predicted)
+
+# 提取必要的数据并创建 data.frame
+df_list <- list(
+  data.frame(specificity = 1 - roc_dt_gini$specificities, sensitivity = roc_dt_gini$sensitivities, model = "Decision Tree (Gini)"),
+  data.frame(specificity = 1 - roc_lgbm_dart$specificities, sensitivity = roc_lgbm_dart$sensitivities, model = "LGBM (DART)"),
+  data.frame(specificity = 1 - roc_lgbm_gbdt$specificities, sensitivity = roc_lgbm_gbdt$sensitivities, model = "LGBM (GBDT)"),
+  data.frame(specificity = 1 - roc_rf$specificities, sensitivity = roc_rf$sensitivities, model = "Random Forest"),
+  data.frame(specificity = 1 - roc_svm_linear$specificities, sensitivity = roc_svm_linear$sensitivities, model = "SVM (Linear)"),
+  data.frame(specificity = 1 - roc_svm_poly$specificities, sensitivity = roc_svm_poly$sensitivities, model = "SVM (Polynomial)"),
+  data.frame(specificity = 1 - roc_svm_rbf$specificities, sensitivity = roc_svm_rbf$sensitivities, model = "SVM (RBF)"),
+  data.frame(specificity = 1 - roc_xgb$specificities, sensitivity = roc_xgb$sensitivities, model = "XGBoost"),
+  data.frame(specificity = 1 - roc_xgboost_1$specificities, sensitivity = roc_xgboost_1$sensitivities, model = "XGBoost (1)"),
+  data.frame(specificity = 1 - roc_xgboost_2$specificities, sensitivity = roc_xgboost_2$sensitivities, model = "XGBoost (2)"),
+  data.frame(specificity = 1 - roc_adaboost$specificities, sensitivity = roc_adaboost$sensitivities, model = "AdaBoost"),
+  data.frame(specificity = 1 - roc_dt_entropy$specificities, sensitivity = roc_dt_entropy$sensitivities, model = "Decision Tree (Entropy)")
+)
+
+# 合并所有 data.frame
+df_all <- do.call(rbind, df_list)
+
+# 检查并移除缺失值和负值
+df_all <- na.omit(df_all)
+df_all <- df_all[df_all$specificity >= 0 & df_all$sensitivity >= 0, ]
+
+# 自定义调色板
+colors <- c("Decision Tree (Gini)" = "#E41A1C", "LGBM (DART)" = "#377EB8", "LGBM (GBDT)" = "#4DAF4A", 
+            "Random Forest" = "#984EA3", "SVM (Linear)" = "#FF7F00", "SVM (Polynomial)" = "#FFFF33", 
+            "SVM (RBF)" = "#A65628", "XGBoost" = "#F781BF", "XGBoost (1)" = "#999999", "XGBoost (2)" = "#66C2A5", 
+            "AdaBoost" = "#FC8D62", "Decision Tree (Entropy)" = "#8DA0CB")
+
+# 绘制 ROC 曲线
+roc_plot <- ggplot(df_all, aes(x = specificity, y = sensitivity, color = model)) + 
+  geom_line(size = 1.2) +
+  geom_abline(slope = 1, intercept = 0, linetype = "dashed", color = "grey50") +
+  labs(
+    title = "ROC Curves for Various Models",
+    x = "False Positive Rate",
+    y = "True Positive Rate"
+  ) +
+  scale_color_manual(values = colors) +
+  theme_minimal() +
+  theme(
+    plot.title = element_text(hjust = 0.5, size = 16, face = "bold"),
+    axis.title = element_text(size = 14),
+    axis.text = element_text(size = 12),
+    legend.title = element_text(size = 12),
+    legend.text = element_text(size = 10),
+    legend.position = "right",
+    plot.background = element_rect(color = "black", size = 1)
+  ) +
+  guides(color = guide_legend(override.aes = list(size = 0.2)))
+
+# 打印图形
+print(roc_plot)
