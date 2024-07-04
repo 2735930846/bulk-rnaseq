@@ -1,11 +1,4 @@
 ####两个数据框根据交集基因来进行表格的底色修改生成新的表格####可以用来喂给GPT，GPT的食量
-
-a <- homo_sapiens[,1]
-write.table(a,"a.txt",sep = "\t",row.names = FALSE,col.names = FALSE,quote = F)
-c <- intersect(a$V1,DEPMAP$V1)
-write.table(c,"RBR蛋白.txt",sep = "\t",row.names = FALSE,col.names = FALSE,quote = F)
-
-
 # 安装并加载必要的包
 #install.packages("openxlsx")
 #install.packages("dplyr")
