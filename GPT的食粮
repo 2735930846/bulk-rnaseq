@@ -1,0 +1,51 @@
+####两个数据框根据交集基因来进行表格的底色修改生成新的表格####可以用来喂给GPT，GPT的食量
+
+a <- homo_sapiens[,1]
+write.table(a,"a.txt",sep = "\t",row.names = FALSE,col.names = FALSE,quote = F)
+c <- intersect(a$V1,DEPMAP$V1)
+write.table(c,"RBR蛋白.txt",sep = "\t",row.names = FALSE,col.names = FALSE,quote = F)
+
+
+# 安装并加载必要的包
+#install.packages("openxlsx")
+#install.packages("dplyr")
+
+library(openxlsx)
+library(dplyr)
+
+# 读取xlsx文件和c表格文件
+xlsx_file <- "C:/Users/A/Desktop/DEPMAP TOTAL.xlsx"
+
+
+# 读取xlsx文件中的第一个工作表
+xlsx_data <- read.xlsx(xlsx_file, sheet = 1)
+
+# 读取c表格文件
+c_data <- RBR蛋白
+
+# 获取两个表格的第一列
+xlsx_first_column <- xlsx_data[, 1]
+c_first_column <- c_data[, 1]
+
+# 找到交集
+common_genes <- intersect(xlsx_first_column, c_first_column)
+
+# 创建样式
+gray_style <- createStyle(fgFill = "#D3D3D3")
+
+# 创建一个新的Workbook对象
+wb <- createWorkbook()
+
+# 将数据写入新工作簿
+addWorksheet(wb, "Sheet1")
+writeData(wb, "Sheet1", xlsx_data)
+
+# 将重复项标记为灰色背景
+for (i in seq_along(xlsx_first_column)) {
+  if (xlsx_first_column[i] %in% common_genes) {
+    addStyle(wb, "Sheet1", style = gray_style, rows = i + 1, cols = 1:ncol(xlsx_data), gridExpand = TRUE)
+  }
+}
+
+# 保存新的xlsx文件
+saveWorkbook(wb, "modified_xlsx_file.xlsx", overwrite = TRUE)
