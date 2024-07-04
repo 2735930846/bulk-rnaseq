@@ -42,3 +42,68 @@ for (i in seq_along(xlsx_first_column)) {
 
 # 保存新的xlsx文件
 saveWorkbook(wb, "modified_xlsx_file.xlsx", overwrite = TRUE)
+
+
+
+
+####根据a的第一列与c的第一列做交集，将发现的重复项在c的表格中根据a的第二列的数值大小进行单元格底色的修改，根据分值得分渐变的那种，给我R源代码（这是问GPT）####
+a <- 交集基因以及得分
+#install.packages("openxlsx")
+#install.packages("dplyr")
+
+library(openxlsx)
+library(dplyr)
+library(scales)
+# 读取xlsx文件和c表格文件
+xlsx_file <- "C:/Users/A/Desktop/DEPMAP TOTAL.xlsx"
+c <- xlsx_file
+# 读取xlsx文件中的第一个工作表
+xlsx_data <- read.xlsx(c, sheet = 1)
+c_data <- xlsx_data
+a_data <- a
+
+
+c_first_column <- c_data[, 1]
+a_first_column <- a_data[, 1]
+
+# 找到交集
+common_genes <- intersect(c_first_column, a_first_column)
+
+# 创建渐变颜色函数
+gradient_color <- colorRampPalette(c("white", "red"))
+
+# 获取a文件中交集基因对应的得分，并归一化
+a_common_scores <- a_data[a_data[, 1] %in% common_genes, 2]
+normalized_scores <- rescale(a_common_scores, to = c(0, 1))
+
+# 生成对应的颜色
+colors <- gradient_color(length(normalized_scores))[order(normalized_scores)]
+
+# 创建样式
+styles <- lapply(colors, function(color) createStyle(fgFill = color))
+
+# 创建一个新的Workbook对象
+wb <- createWorkbook()
+
+# 将c_data写入新工作簿
+addWorksheet(wb, "Sheet1")
+writeData(wb, "Sheet1", c_data)
+
+# 将重复项根据得分标记为对应颜色背景
+for (i in seq_along(common_genes)) {
+  gene <- common_genes[i]
+  row_index <- which(c_first_column == gene)
+  addStyle(wb, "Sheet1", style = styles[[i]], rows = row_index + 1, cols = 1, gridExpand = TRUE)
+}
+
+# 保存新的xlsx文件
+saveWorkbook(wb, "C:/Users/A/Desktop/modified_c_list.xlsx", overwrite = TRUE)
+
+
+
+
+
+
+
+
+
