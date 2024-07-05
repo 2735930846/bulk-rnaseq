@@ -1,0 +1,56 @@
+install.packages("jsonlite")
+install.packages("dplyr")
+library(jsonlite)
+library(dplyr)
+# JSON文件的路径
+json_path <- "C:/Users/Administrator/Desktop/human_reviewed.json"
+
+# 读取JSON文件内容
+json_content <- readLines(json_path, warn = FALSE)
+
+# 将NaN替换为null
+json_content <- gsub("NaN", "null", json_content)
+
+# 将内容写入临时文件
+temp_json_path <- tempfile(fileext = ".json")
+writeLines(json_content, temp_json_path)
+
+# 使用jsonlite从临时文件读取JSON数据
+df_list <- fromJSON(temp_json_path)
+
+first_nested_list <- df_list[[1]]
+
+# 检查第一个嵌套列表的结构
+str(first_nested_list)
+
+# 将第一个嵌套列表转换为数据框
+first_df <- as.data.frame(first_nested_list, stringsAsFactors = FALSE)
+
+# 查看数据框的结构
+str(first_df)
+
+# 打印前几个条目
+head(first_df)
+
+fileConn <- file("output.txt")
+
+# 初始化一个字符串向量来存储结果
+output_lines <- c()
+
+# 遍历 df_list，提取 Gene names 和 catGRANULE 下的 single 值
+for (item in df_list) {
+  gene_name <- item[["Gene names"]]
+  catGRANULE_single <- item[["catGRANULE"]][["single"]]
+  
+  # 创建一行文本
+  output_line <- paste(gene_name, catGRANULE_single, sep = "\t")
+  
+  # 添加到输出行向量
+  output_lines <- c(output_lines, output_line)
+}
+
+# 将结果写入文件
+writeLines(output_lines, fileConn)
+
+# 关闭文件连接
+close(fileConn)
