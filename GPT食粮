@@ -46,22 +46,30 @@ saveWorkbook(wb, "modified_xlsx_file.xlsx", overwrite = TRUE)
 
 
 
-####根据a的第一列与c的第一列做交集，将发现的重复项在c的表格中根据a的第二列的数值大小进行单元格底色的修改，根据分值得分渐变的那种，给我R源代码（这是问GPT）####
-a <- 交集基因以及得分
-#install.packages("openxlsx")
-#install.packages("dplyr")
+# 安装并加载必要的包
+# install.packages("openxlsx")
+# install.packages("dplyr")
+# install.packages("scales")
 
 library(openxlsx)
 library(dplyr)
 library(scales)
-# 读取xlsx文件和c表格文件
-xlsx_file <- "C:/Users/A/Desktop/DEPMAP TOTAL.xlsx"
-c <- xlsx_file
-# 读取xlsx文件中的第一个工作表
-xlsx_data <- read.xlsx(c, sheet = 1)
-c_data <- xlsx_data
-a_data <- a
 
+# 读取xlsx文件和c列表文件
+xlsx_file <- "C:/Users/A/Desktop/DEPMAP TOTAL.xlsx"
+c_file <- "C:/Users/A/Desktop/c_list.csv"
+a_file <- "C:/Users/A/Desktop/a_file.csv"  # 包含交集基因及得分
+
+# 读取xlsx文件中的第一个工作表
+xlsx_data <- read.xlsx(xlsx_file, sheet = 1)
+
+# 读取c列表文件和a文件
+c_data <- read.csv(c_file, header = FALSE, stringsAsFactors = FALSE)
+a_data <- read.csv(a_file, stringsAsFactors = FALSE)
+
+# 获取c和a的第一列
+c_first_column <- c_data[, 1]
+a_first_column <- a_data[, 1]
 
 # 找到交集
 common_genes <- intersect(c_first_column, a_first_column)
@@ -98,8 +106,6 @@ for (i in seq_along(c_first_column)) {
 
 # 保存新的xlsx文件
 saveWorkbook(wb, "C:/Users/A/Desktop/modified_c_list.xlsx", overwrite = TRUE)
-
-
 
 
 
