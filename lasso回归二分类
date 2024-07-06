@@ -1,0 +1,55 @@
+# 安装并加载必要的包
+if (!require(glmnet)) install.packages('glmnet')
+library(glmnet)
+library(survival)
+library(tidyverse)
+
+# 读取数据，数据整理成相应格式，label一列是预测的结局#
+data <- extracted_tpms_log2_with_labels
+
+# 设置结局变量
+y <- as.factor(data$label)
+
+# 去掉label列，只保留特征数据
+x <- as.matrix(data[ , -which(names(data) == "label")])
+
+# 设立随机种子，保证数据的可重复性
+set.seed(1)
+
+# 执行Lasso回归
+cvla <- glmnet(x, y, family = 'binomial')
+
+# 使用交叉验证找到最优的lambda值
+cv.fit <- cv.glmnet(x, y, family='binomial')
+
+# 画图
+plot(cvla, xvar='lambda', label=TRUE)
+plot(cv.fit)
+
+# 提取lambda最小值和标准误
+lambda_min <- cv.fit$lambda.min
+lambda_1se <- cv.fit$lambda.1se
+
+# 提取基因（以右侧虚线为准）
+coef_right <- coef(cvla, s=lambda_1se)
+index_right <- which(coef_right != 0)
+actcoef_right <- coef_right[index_right]
+LassoGene_right <- rownames(coef_right)[index_right]
+genecoef_right <- data.frame(Gene=LassoGene_right, Coef=actcoef_right)
+
+# 提取基因（以左侧虚线为准）
+coef_left <- coef(cvla, s=lambda_min)
+index_left <- which(coef_left != 0)
+actcoef_left <- coef_left[index_left]
+LassoGene_left <- rownames(coef_left)[index_left]
+genecoef_left <- data.frame(Gene=LassoGene_left, Coef=actcoef_left)
+
+# 输出结果
+genecoef_right
+genecoef_left
+
+# 保存结果到文件
+write.table(genecoef_right, file = "LassoGene_right.txt", sep = "\t", row.names = FALSE, col.names = TRUE, quote = FALSE)
+write.table(genecoef_left, file = "LassoGene_left.txt", sep = "\t", row.names = FALSE, col.names = TRUE, quote = FALSE)
+
+
