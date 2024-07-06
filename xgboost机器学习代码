@@ -1,97 +1,148 @@
-#注意整理好成相应格式，确保最后一列是Label，肿瘤和正常组命名为0和1，进行二分类
 # 安装并加载必要的包
-# 如果没有安装这些包，请取消注释以下安装命令
-# install.packages("xgboost")
-# install.packages("caret")
-# install.packages("pROC")
-# install.packages("tibble")
-# install.packages("ROCit")
-# install.packages("ggplot2")
-# install.packages("shapviz")
-
+library(dplyr)
+library(data.table)
 library(xgboost)
+library(Matrix)
 library(caret)
 library(pROC)
-library(tibble)
-library(ROCit)
 library(ggplot2)
-library(shapviz)
+library(ggpubr)
+library(ggprism)
 
-# 假设你已经导入了数据框 tpms_log2
-
-# 1. 转置数据框
-tpms_transposed <- t(tpms_log2)
-
-# 2. 将转置后的数据框转换为数据框格式
-tpms_transposed <- as.data.frame(tpms_transposed)
-
-column_names <- c("CDKN1C","ADRA1A","BCL2A1","DPP4", "CACNA1B", "TFPI", "KCNA5", "CYB5A")
-#整理LASSO输入数据，这里就无缝衔接原代码就好了
-tpms_transposed <-tpms_transposed[,column_names]
-write.table(tpms_transposed,"Machine Learning.txt",sep = "\t",row.names = T,col.names = NA,quote = F)
+# 读取数据,这里你可以自己准备好数据格式，我这里是提取了lasso回归筛选到的6个基因以及label值，命名为data，后面直接跑代码就可以了#
+data <- extracted_tpms_log2_with_labels
+#提取我们所需要的y和x
+selected_columns <- c("TOP2A", "CDK2", "MMP9", "SCD", "SLC2A1", "CDK1", "label")
+data <- data[, selected_columns]
 
 
-# 3. 新增列 Label 并根据条件赋值
-tpms_transposed$Label <- ifelse(substr(rownames(tpms_transposed), 14, 16) == "01A", 1, 0)
+# 分割数据为训练集和测试集
+set.seed(123)  # 设置随机种子，保证结果可复现
+split <- createDataPartition(data$label, p = 0.6, list = FALSE)  # 将数据按照指定比例分割
+train_data <- data[split, ]  # 训练集
+test_data <- data[-split, ]  # 测试集
 
-# 现在 tpms_transposed 数据框中就包含了转置后的数据，并且有 Label 列根据条件赋值。
-table(tpms_transposed$Label)
+# 定义训练集特征和目标变量
+X_train <- train_data[, -which(names(train_data) == "label")]
+y_train <- train_data$label
 
-#这里我直接导入了我之前搞好的数据，如果没搞好就用之前的
-tpms_transposed <- read.table("MachineLearning.txt", sep = "\t", row.names = 1, check.names = FALSE, stringsAsFactors = FALSE, header = TRUE)
-tpms_transposed <- tpms_transposed[,c("CDKN1C","ADRA1A","BCL2A1","DPP4", "CACNA1B", "TFPI", "KCNA5", "CYB5A","Label")]
+# 将特征和目标变量转换为DMatrix格式
+dtrain <- xgb.DMatrix(data = as.matrix(X_train), label = y_train)
 
+# 设置XGBoost参数
+params <- list(objective = "binary:logistic", eval_metric = "logloss", eta = 0.1, max_depth = 3)
 
-# 读取数据
-my_data <- tpms_transposed
+# 设置迭代轮数（树的数量）
+nrounds <- 100
 
-# 查看数据结构
-str(my_data)
+# 训练XGBoost模型
+xgb_model <- xgboost(params = params, data = dtrain, nrounds = nrounds)
 
-# 确保最后一列是Label
-if (!("Label" %in% colnames(my_data))) {
-  stop("数据框中没有 'Label' 列，请检查数据。")
-}
+# 在训练集上进行预测
+train_predictions <- predict(xgb_model, newdata = dtrain)
+train_predictions <- ifelse(train_predictions > 0.5, 1, 0)
 
+# 计算准确率
+accuracy <- mean(train_predictions == y_train)
+print(paste("训练集准确率:", accuracy))
 
-# 标准化特征数据（去除Label列）
-features <- my_data[, -ncol(my_data)]
-features <- scale(features)
+# 在测试集上进行预测
+X_test <- test_data[, -which(names(test_data) == "label")]
+y_test <- test_data$label
 
-# 将标准化后的数据和Label列组合成新的数据框
-my_data_scaled <- data.frame(features, Label = my_data$Label)
+dtest <- xgb.DMatrix(data = as.matrix(X_test))
+test_predictions <- predict(xgb_model, newdata = dtest)
+test_predictions <- ifelse(test_predictions > 0.5, 1, 0)
 
-# 划分训练集和测试集
-set.seed(123)
-inTrain <- createDataPartition(y = my_data_scaled$Label, p = 0.6, list = FALSE)
-traindata <- my_data_scaled[inTrain, ]
-testdata <- my_data_scaled[-inTrain, ]
+# 计算准确率
+accuracy <- mean(test_predictions == y_test)
+print(paste("测试集准确率:", accuracy))
 
-# 特征名称
-feature_names <- colnames(traindata)[-ncol(traindata)]
+# 使用caret包进行调参
+ctrl <- trainControl(method = "cv", number = 5, verboseIter = FALSE)
 
-# 训练XGBoost模型（添加正则化参数）
-model_xgboost <- xgboost(
-  data = as.matrix(traindata[, feature_names]),
-  label = traindata$Label,
-  max_depth = 3,
-  eta = 0.1,          # 降低学习率
-  lambda = 1,         # L2 正则化
-  alpha = 0.5,        # L1 正则化
-  nthread = 2,
-  nrounds = 100,      # 增加迭代次数
-  objective = "binary:logistic"
+# 设置参数网格
+param_grid <- expand.grid(
+  nrounds = c(100, 200), 
+  max_depth = c(3, 6), 
+  eta = c(0.1), 
+  gamma = c(0, 0.1), 
+  colsample_bytree = c(0.8), 
+  min_child_weight = c(1, 3), 
+  subsample = c(0.8)
 )
 
-# 生成训练集预测值并计算AUC
-traindata$pred <- predict(model_xgboost, as.matrix(traindata[, feature_names]))
-ROC_train <- round(auc(response = traindata$Label, predictor = traindata$pred), 4)
-print(paste("Train AUC:", ROC_train))
+# 使用train()函数进行参数调优
+xgb_model <- train(
+  x = X_train,
+  y = y_train,
+  method = "xgbTree",
+  trControl = ctrl,
+  tuneGrid = param_grid
+)
 
-# 计算和可视化SHAP值
-shap_xgboost <- shapviz(model_xgboost, X_pred = as.matrix(traindata[, feature_names]))
+# 输出最佳参数配置
+print(xgb_model$bestTune)
 
-importance_plot <- sv_importance(shap_xgboost) +
+# 使用最佳参数训练模型
+params <- list(objective = "binary:logistic", eval_metric = "logloss", 
+               eta = 0.1, max_depth = 3, gamma = 0.1,
+               colsample_bytree = 0.8,
+               min_child_weight = 1,
+               subsample = 0.8)
+
+xgb_model_final <- xgb.train(params = params, data = dtrain, nrounds = 200)
+
+# 在训练集上进行预测
+train_predictions <- predict(xgb_model_final, newdata = dtrain)
+train_predictions <- ifelse(train_predictions > 0.5, 1, 0)
+
+# 计算准确率
+accuracy <- mean(train_predictions == y_train)
+print(paste("训练集准确率:", accuracy))
+
+# 在测试集上进行预测
+test_predictions <- predict(xgb_model_final, newdata = dtest)
+test_predictions <- ifelse(test_predictions > 0.5, 1, 0)
+
+# 计算准确率
+accuracy <- mean(test_predictions == y_test)
+print(paste("测试集准确率:", accuracy))
+
+# 绘制ROC曲线
+roc_obj <- roc(y_test, test_predictions)
+plot(roc_obj, main = "ROC Curve", xlab = "False Positive Rate", ylab = "True Positive Rate")
+abline(a = 0, b = 1, lty = 2, col = "gray")
+
+# 创建混淆矩阵并计算性能指标
+confusion_matrix <- confusionMatrix(as.factor(test_predictions), as.factor(y_test))
+print(confusion_matrix)
+
+# 提取准确率、召回率、特异性和F1分数
+accuracy <- confusion_matrix$overall["Accuracy"]
+recall <- confusion_matrix$byClass["Recall"]
+specificity <- confusion_matrix$byClass["Specificity"]
+f1 <- confusion_matrix$byClass["F1"]
+
+cat("准确率:", accuracy, "\n")
+cat("召回率:", recall, "\n")
+cat("特异性:", specificity, "\n")
+cat("F1分数:", f1, "\n")
+
+#SHAP#
+# 加载shapviz包
+if (!require(shapviz)) install.packages('shapviz')
+library(shapviz)
+
+# 转换数据格式
+X_train_matrix <- as.matrix(X_train)
+X_test_matrix <- as.matrix(X_test)
+
+# 计算SHAP值
+shap_values <- shapviz(xgb_model_final, X_train_matrix)
+
+# 绘制SHAP值图
+importance_plot <- sv_importance(shap_values) +
   theme_minimal() +
   ggtitle("Feature Importance") +
   xlab("Mean Absolute SHAP Value") +
@@ -105,35 +156,8 @@ importance_plot <- sv_importance(shap_xgboost) +
 
 print(importance_plot)
 
-sv_importance(shap_xgboost, kind = "beeswarm")
-sv_waterfall(shap_xgboost, row_id = 1)
-sv_force(shap_xgboost, row_id = 1)
-
-# 在测试集上生成预测值并计算性能指标
-testdata$pred <- predict(model_xgboost, as.matrix(testdata[, feature_names]))
-
-# 计算测试集AUC
-ROC_test <- round(auc(response = testdata$Label, predictor = testdata$pred), 4)
-print(paste("Test AUC:", ROC_test))
-
-# 绘制ROC曲线
-roc_obj <- roc(testdata$Label, testdata$pred)
-plot(roc_obj, main = "ROC Curve", xlab = "False Positive Rate", ylab = "True Positive Rate")
-abline(a = 0, b = 1, lty = 2, col = "gray")
-
-# 创建混淆矩阵并计算性能指标
-predicted_classes <- ifelse(testdata$pred > 0.5, 1, 0)
-confusion_matrix <- confusionMatrix(as.factor(predicted_classes), as.factor(testdata$Label))
-print(confusion_matrix)
-
-# 提取准确率、召回率、特异性和F1分数
-accuracy <- confusion_matrix$overall["Accuracy"]
-recall <- confusion_matrix$byClass["Recall"]
-specificity <- confusion_matrix$byClass["Specificity"]
-f1 <- confusion_matrix$byClass["F1"]
-
-cat("准确率:", accuracy, "\n")
-cat("召回率:", recall, "\n")
-cat("特异性:", specificity, "\n")
-cat("F1分数:", f1, "\n")
+# 可视化其他SHAP图
+sv_importance(shap_values, kind = "beeswarm")
+sv_waterfall(shap_values, row_id = 1)
+sv_force(shap_values, row_id = 1)
 
