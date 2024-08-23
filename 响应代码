@@ -1,168 +1,66 @@
-counts <- a
-c <- counts$Protein.Group
-rownames(counts) <- c
-counts <- counts[,2:8]
-counts <- counts[!apply(counts[, 1:3], 1, function(x) all(is.na(x))), ]
-counts[is.na(counts)] <- 1
-
-#差异分析
 library(tidyverse)
-#安装BiocManager
-#BiocManager::install('DESeq2')
-library(DESeq2)
-##以下理解即可
+counts <- xy
+counts <- as.data.frame(counts)
+#将counts的第一列行名命名为蛋白名称#
+rownames(counts) <- counts[, 1]
+counts <- counts[, -1]
+#去除三列都是NA的蛋白#
+counts <- counts[!apply(counts[, 1:3], 1, function(x) all(is.na(x))), ]
+#将剩余数据中的NA都填补为1#
+counts[is.na(counts)] <- 1
+#命名为tpms_log2后面就不用改代码了#
+tpms_log2 <- counts
+#设置参考水平
+# 创建分组向量
+group_list <- c(rep("txy_3", 3), rep("DMSO", 4))
 
+# 将分组向量转换为因子型
+group_list <- factor(group_list, levels = c("txy_3", "DMSO"))
 
-#设置分组信息
-conditions=data.frame(sample=colnames(counts),
-                      group=factor(ifelse(substr(colnames(counts),1,3) == "txy","T","N"),levels = c("N","T"))) %>% 
-  column_to_rownames("sample")
+# 查看结果
+print(group_list)
 
-#data.frame创建数据框
-x <- data.frame(name=c("zhang","li","wu"),
-                rank=c("1","2","3")
-)
-
-factor(ifelse(substr(colnames(counts),14,16) == "01A","T","N"),levels = c("N","T"))#因子
-
-
-
-#准备差异分析
-dds <- DESeqDataSetFromMatrix(
-  countData = counts,
-  colData = conditions,
-  design = ~ group)
-#开始差异分析
-dds <- DESeq(dds)
-resultsNames(dds)
-res <- results(dds)
-save(res,file = "STAD-DEG.rda")#一定要保存！
-#自定义差异基因
-DEG <- as.data.frame(res)
-DEG <- arrange(DEG,padj)
-#DEG <- arrange(DEG,desc(padj))
-#arrange(数据框名,列名) 默认从小到大排序
-#arrange(数据框名，desc(列名)) 从大到小排序
-DEG <- filter(DEG,abs(log2FoldChange) > 1, padj < 0.05)
-#filter(数据框名,筛选条件)
-#abs 绝对值
-
-#三合一
-DEG <- as.data.frame(res)%>% 
-  arrange(padj) %>% 
-  filter(abs(log2FoldChange) > 1, padj < 0.05)#根据自己需要
-
-####TCGA差异分析热图展示####
-exp <- read.table("tpms_log2.txt",sep = "\t",row.names = 1,check.names = F,stringsAsFactors = F,header = T)
-
-DEG <- as.data.frame(res)
-DEG <- arrange(DEG,padj)
-
-#DEG <- as.data.frame(res)%>% arrange(padj)
-
-logFC_cutoff <- 1 #and &
-type1 = (DEG$padj < 0.05)&(DEG$log2FoldChange < -logFC_cutoff)
-type2 = (DEG$padj < 0.05)&(DEG$log2FoldChange > logFC_cutoff)
+library(limma)#差异分析的包
+#理解即可
+design=model.matrix(~group_list)
+fit=lmFit(tpms_log2,design)#注意是exp1了现在
+fit=eBayes(fit)
+DEG=topTable(fit,coef=2,number = Inf)#提取排序
+save(DEG,file = "GSE14520_DEG.rda") 
+##标记上下调基因
+logFC_cutoff <- 1
+type1 = (DEG$adj.P.Val < 0.01)&(DEG$logFC < -logFC_cutoff)
+type2 = (DEG$adj.P.Val < 0.01)&(DEG$logFC > logFC_cutoff)
 DEG$change = ifelse(type1,"DOWN",ifelse(type2,"UP","NOT"))
 table(DEG$change)
-DEG <- na.omit(DEG)
-#下载pheatmap包 两种方法
-library(pheatmap)
-genenames <- rownames(DEG)
-cg = genenames[DEG$change != "NOT"]
-#合二为一
-cg = rownames(DEG)[DEG$change != "NOT"]#不等于、
-#方法二
+####GEO差异分析热图绘制####
 a <- filter(DEG,change == 'UP')
 b <- filter(DEG,change == 'DOWN')
 c <- rbind(a,b)
-d <- rownames(c)
-identical(cg,d)
-#提取差异基因表达谱
-exp_diff <- exp[d,]
-
-#设置分组信息
-group_list=factor(ifelse(substr(colnames(exp),14,16) == "01A","T","N"),levels = c("N","T"))
+exp_diff=tpms_log2[rownames(c),]
+library(pheatmap)
 annotation_col=data.frame(group=group_list)
-rownames(annotation_col)=colnames(exp_diff)
-
-#分组信息方法二
-#annotation_col=data.frame(sample=colnames(exp_diff),
-#                      group=factor(ifelse(substr(colnames(exp_diff),14,16) == "01A","T","N"),levels = c("N","T"))) %>% 
-#  column_to_rownames("sample")
-
-#分组信息方法三
-#annotation_col <- conditions
-
-#开始画图
+rownames(annotation_col)=colnames(exp_diff) 
 pheatmap(exp_diff,
          annotation_col=annotation_col,
          scale = "row",
          show_rownames = F,
          show_colnames =F,
+         cluster_cols =F,
+         cluster_rows =T,
          color = colorRampPalette(c("navy", "white", "red"))(50),
-         cluster_cols =F,
-         cluster_rows = F,
          fontsize = 10,
          fontsize_row=3,
          fontsize_col=3)
-#保存图片 调整大小
-dev.off()#关闭画板
+dev.off()
 
-#调整热图颜色深浅
-pheatmap(exp_diff,
-         annotation_col=annotation_col,
-         scale = "row",
-         show_rownames = F,
-         show_colnames =F,
-         color = colorRampPalette(c(rep("royalblue",4),"white",rep("firebrick3",4)))(50),
-         cluster_cols =F,
-         cluster_rows = F,
-         fontsize = 10,
-         fontsize_row=3,
-         fontsize_col=3)
-#保存图片 调整大小
-dev.off()#关闭画板
-
-
-####TCGA差异分析火山图展示####
-#安装包
-#install.packages("ggpubr")
-#install.packages("ggthemes")
+####差异分析火山图####
 library(ggpubr)
 library(ggthemes)
-setwd("TCGA-STAD")
-setwd("T_N_DEG")
-library(tidyverse)
-exp <- read.table("tpms_log2.txt",sep = "\t",row.names = 1,check.names = F,stringsAsFactors = F,header = T)
-#读取差异分析rda文件
-#DEG <- as.data.frame(res)%>% arrange(padj)
-DEG <- as.data.frame(res)
-DEG <- arrange(DEG,padj)
-
-logFC_cutoff <- 1
-type1 = (DEG$padj < 0.05)&(DEG$log2FoldChange < -logFC_cutoff)
-type2 = (DEG$padj < 0.05)&(DEG$log2FoldChange > logFC_cutoff)
-DEG$change = ifelse(type1,"DOWN",ifelse(type2,"UP","NOT"))
-DEG <- na.omit(DEG)
-table(DEG$change)
-
 #下面直接跑即可
-DEG$logP <- -log10(DEG$padj)#为什么要-log呢 数学原理
-#初步图片
-ggscatter(DEG,
-          x = "log2FoldChange", y = "logP") +
-  theme_base()
+DEG$logP <- -log10(DEG$adj.P.Val)#为什么要-log呢 数学原理
 
-#增加基因上下调信息
-ggscatter(DEG, x = "log2FoldChange", y = "logP",
-          color = "change",
-          palette = c("blue", "black", "red"),
-          size = 1) +
-  theme_base()
-
-#添加分界线
-ggscatter(DEG, x = "log2FoldChange", y = "logP", xlab = "log2FoldChange",
+ggscatter(DEG, x = "logFC", y = "logP", xlab = "log2FoldChange",
           ylab = "-log10(Adjust P-value)",
           color = "change",
           palette = c("blue", "black", "red"),
@@ -172,16 +70,12 @@ ggscatter(DEG, x = "log2FoldChange", y = "logP", xlab = "log2FoldChange",
   geom_vline(xintercept = c(-1, 1), linetype = "dashed")
 dev.off()
 
-##如何添加特定基因标签
-DEG$Gene <- rownames(DEG)
+#添加特定基因标签
 DEG$Label = "" 
 gene <- "CDKN3" #输入你要的基因名
-#gene <- c("","","")
-#如何添加多个基因
-
+DEG <- rownames_to_column(DEG,var = "Gene")
 DEG$Label[match(gene, DEG$Gene)] <- gene
-#画图
-ggscatter(DEG, x = "log2FoldChange", y = "logP",
+ggscatter(DEG, x = "logFC", y = "logP",
           color = "change",
           palette = c("blue", "black", "red"),
           size = 1,
@@ -193,4 +87,41 @@ ggscatter(DEG, x = "log2FoldChange", y = "logP",
   theme_base() +
   geom_hline(yintercept = -log10(0.05), linetype = "dashed") +
   geom_vline(xintercept = c(-1, 1), linetype = "dashed")
+
+dev.off()
+
+####GEO选定基因T/N表达差异####
+setwd("GSE14520")
+setwd("T_N_DEG")
+library(tidyverse)
+tpms01A_log2 <- read.table("tpms01A_log2.txt",sep = "\t",row.names = 1,check.names = F,stringsAsFactors = F,header = T)
+tpms11A_log2 <- read.table("tpms11A_log2.txt",sep = "\t",row.names = 1,check.names = F,stringsAsFactors = F,header = T)
+gene <- "CDKN3"#以后修改这里即可 小技巧
+#gene <- c("","","") 
+#如果想多提取几个基因怎么办 集合
+a <- tpms01A_log2[gene,]
+b <- tpms11A_log2[gene,]
+##运用传导符%>%  cltrl+shift+M 
+a <- a %>% t() %>% as.data.frame()
+b <- b %>% t() %>% as.data.frame()
+write.csv(a, file = "CDKN3_T.csv")
+write.csv(b, file = "CDKN3_N.csv")
+#仙桃画图
+#R作图
+a <- read.table("tpms_log2.txt",sep = "\t",row.names = 1,check.names = F,stringsAsFactors = F,header = T)
+a <- a %>% t() %>% as.data.frame()
+#手动导入pdata1
+identical(rownames(a),rownames(pdata1))
+#添加分组信息
+a$group <- pdata1$group
+library(ggpubr)
+library(ggsci)
+ggboxplot(a,
+          x = "group", y = "CDKN3",#可以画任何一个基因
+          fill = "group") +
+  scale_fill_lancet()+
+  stat_compare_means(comparisons = list(c(1, 2)),
+                     method = "wilcox.test",   #设置统计方法
+                     symnum.args=list(cutpoints = c(0, 0.001, 0.01, 0.05, 1),
+                                      symbols = c("***", "**", "*", "ns")))
 dev.off()
